@@ -1314,18 +1314,16 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         return;
       }
 
-      // 4. Tab Navigation (1-6) on Desktop
+      // 4. Tab Navigation (1-4) on Desktop
       if (e.key === '1') handleTabChange('overview');
       else if (e.key === '2') handleTabChange('ads');
       else if (e.key === '3') handleTabChange('categories');
-      else if (e.key === '4') handleTabChange('monetization');
-      else if (e.key === '5') handleTabChange('security');
-      else if (e.key === '6') handleTabChange('settings');
+      else if (e.key === '4') handleTabChange('settings');
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [categoryModal.isOpen, categoryToDelete, selectedAdForModal, mobileSidebarOpen, searchQuery, categorySearchQuery, onClose]);
+  }, [cityModal.isOpen, cityToDelete, categoryModal.isOpen, categoryToDelete, selectedAdForModal, mobileSidebarOpen, searchQuery, categorySearchQuery, onClose]);
 
   // ========================================================
   // LOGIN SCREEN - Relaxed Obsidian Focus Card

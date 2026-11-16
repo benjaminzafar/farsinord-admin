@@ -95,11 +95,10 @@ export default async function handler(req, res) {
 
     // 3. Protected Admin Actions
     if (action === 'overview') {
-      const [totalRes, activeRes, vipRes, archiveRes, recentRes, metaRes, settingsRes] = await Promise.all([
+      const [totalRes, activeRes, vipRes, recentRes, metaRes, settingsRes] = await Promise.all([
         supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }),
         supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('status', 'active'),
         supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('is_featured', true),
-        supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).neq('status', 'active'),
         supabase.from('swedpersiska_ads').select('*').eq('status', 'active').order('created_at', { ascending: false }).limit(5),
         supabase.from('swedpersiska_ads').select('category, country, status, is_featured, views_count'),
         supabase.from('swedpersiska_settings').select('*')
@@ -133,7 +132,6 @@ export default async function handler(req, res) {
           total: totalRes.count ?? 0,
           active: activeRes.count ?? 0,
           vip: vipRes.count ?? 0,
-          archive: archiveRes.count ?? 0,
           totalViews
         },
         countryStats,
@@ -191,39 +189,9 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ads: data || [], count: count ?? 0, page });
     }
 
-    if (action === 'archive_ads') {
-      const page = Math.max(1, Number(body.page || (req.query && req.query.page)) || 1);
-      const from = (page - 1) * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
-
-      const { data, count, error } = await supabase
-        .from('swedpersiska_ads')
-        .select('*', { count: 'exact' })
-        .neq('status', 'active')
-        .order('created_at', { ascending: false })
-        .range(from, to);
-
-      if (error) throw error;
-      return res.status(200).json({ ok: true, ads: data || [], count: count ?? 0, page });
-    }
-
     if (action === 'toggle_featured') {
       const { id, is_featured } = body;
       const { error } = await supabase.from('swedpersiska_ads').update({ is_featured: !!is_featured }).eq('id', id);
-      if (error) throw error;
-      return res.status(200).json({ ok: true });
-    }
-
-    if (action === 'archive_ad') {
-      const { id } = body;
-      const { error } = await supabase.from('swedpersiska_ads').update({ status: 'hidden' }).eq('id', id);
-      if (error) throw error;
-      return res.status(200).json({ ok: true });
-    }
-
-    if (action === 'restore_ad') {
-      const { id } = body;
-      const { error } = await supabase.from('swedpersiska_ads').update({ status: 'active' }).eq('id', id);
       if (error) throw error;
       return res.status(200).json({ ok: true });
     }
