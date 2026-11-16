@@ -1632,7 +1632,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 {activeTab === 'categories' && 'مدیریت دسته‌بندی‌ها'}
                 {activeTab === 'settings' && 'تنظیمات کلی سایت'}
               </span>
-              <span className="text-[11px] text-stone-500 font-medium mt-0.5">سوئد پرشیا • سامانه نیازمندی‌ها</span>
             </div>
           </div>
 
@@ -1965,10 +1964,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                             </div>
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                                <span dir="ltr" className="inline-flex items-center font-mono font-bold text-[11px] sm:text-[11.5px] text-stone-700 bg-stone-100 px-2 py-0.5 rounded-md border border-stone-200/70 shadow-sm whitespace-nowrap shrink-0">
-                                  <span>#</span>
-                                  <span>{ad.reference_number || ad.id.slice(0, 8)}</span>
-                                </span>
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-blue-50 text-blue-700 border border-blue-200/80 whitespace-nowrap shrink-0">
                                   {NORDIC_FLAGS[ad.country || 'se']}
                                   <span>{countryObj.nameFa}</span>
@@ -2276,25 +2271,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                               </div>
                               <div className="min-w-0 flex-1 space-y-1.5">
                                 <div className="flex items-center flex-wrap gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => copyText(ad.reference_number, `m-ref-${ad.id}`, 'کد پیگیری')}
-                                    className="font-mono text-[11px] font-bold text-stone-800 bg-stone-100 px-1.5 py-0.5 rounded border border-stone-200 inline-flex items-center gap-1 whitespace-nowrap"
-                                  >
-                                    <span dir="ltr">#{ad.reference_number || ad.id.slice(0, 8)}</span>
-                                    {copiedKey === `m-ref-${ad.id}` ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} className="text-stone-400" />}
-                                  </button>
-                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200/70 whitespace-nowrap">
-                                    {countryObj.nameFa}
+                                  <span className="px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-blue-50 text-blue-700 border border-blue-200/70 inline-flex items-center gap-1 whitespace-nowrap">
+                                    {NORDIC_FLAGS[ad.country || 'se']}
+                                    <span>{countryObj.nameFa}</span>
                                   </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => copyText(ad.pin_code || '1234', `m-pin-${ad.id}`, 'رمز ویرایش')}
-                                    className="tabular-nums text-[10.5px] font-extrabold text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 inline-flex items-center gap-1 whitespace-nowrap"
-                                  >
-                                    <span>رمز: <span className="font-mono">{ad.pin_code || '1234'}</span></span>
-                                    {copiedKey === `m-pin-${ad.id}` ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} className="text-amber-600" />}
-                                  </button>
                                   {ad.is_featured && (
                                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 text-[10px] font-extrabold border border-amber-300 whitespace-nowrap">
                                       <Sparkles size={10} className="text-amber-600" />
@@ -2370,7 +2350,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       <thead>
                         <tr className="bg-stone-50/90 border-b border-stone-200/80 text-[11.5px] font-bold text-stone-500 select-none">
                           <th className="py-3 px-3 text-center w-14">تصویر</th>
-                          <th className="py-3 px-3 min-w-[130px]">شناسه و رمز</th>
+                          <th className="py-3 px-3 text-center w-28">کشور</th>
                           <th className="py-3 px-3 min-w-[220px]">عنوان و دسته‌بندی</th>
                           <th className="py-3 px-3 min-w-[120px]">شهر و قیمت</th>
                           <th className="py-3 px-3 text-center w-20">بازدید</th>
@@ -2406,40 +2386,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                 </div>
                               </td>
 
-                              {/* 2. Reference, PIN & Country */}
-                              <td className="py-2.5 px-3 align-middle">
-                                <div className="space-y-1">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <button
-                                      type="button"
-                                      onClick={() => copyText(ad.reference_number, `ref-${ad.id}`, 'کد پیگیری')}
-                                      className="font-mono text-[11px] font-bold text-stone-800 bg-stone-100 hover:bg-stone-200 px-1.5 py-0.5 rounded border border-stone-200 flex items-center gap-1 cursor-pointer transition-colors"
-                                      title="کپی کد پیگیری"
-                                    >
-                                      <span dir="ltr" className="inline-flex items-center">
-                                        <span>#</span>
-                                        <span>{ad.reference_number || ad.id.slice(0, 8)}</span>
-                                      </span>
-                                      {copiedKey === `ref-${ad.id}` ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} className="text-stone-400" />}
-                                    </button>
-
-                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200/70">
-                                      {countryObj.nameFa}
-                                    </span>
-                                  </div>
-
-                                  <div>
-                                    <button
-                                      type="button"
-                                      onClick={() => copyText(ad.pin_code || '1234', `pin-${ad.id}`, 'رمز ویرایش')}
-                                      className="tabular-nums text-[10.5px] font-extrabold text-amber-900 bg-amber-50 hover:bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200 flex items-center gap-1 cursor-pointer transition-colors"
-                                      title="کپی رمز ویرایش"
-                                    >
-                                      <span>رمز: <span className="font-mono">{ad.pin_code || '1234'}</span></span>
-                                      {copiedKey === `pin-${ad.id}` ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} className="text-amber-600" />}
-                                    </button>
-                                  </div>
-                                </div>
+                              {/* 2. Country */}
+                              <td className="py-2.5 px-3 text-center align-middle">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-blue-50 text-blue-700 border border-blue-200/70 whitespace-nowrap">
+                                  {NORDIC_FLAGS[ad.country || 'se']}
+                                  <span>{countryObj.nameFa}</span>
+                                </span>
                               </td>
 
                               {/* 3. Title & Category */}
