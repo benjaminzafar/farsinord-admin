@@ -210,14 +210,14 @@ const AVAILABLE_CATEGORY_ICONS = [
 ];
 
 const DEFAULT_CATEGORIES = [
-  { id: 'bostad', fa: 'مسکن و خانه', icon: 'Home', enabled: true, isSystem: true, order: 1 },
-  { id: 'restaurang', fa: 'رستوران و خوراک', icon: 'Utensils', enabled: true, isSystem: true, order: 2 },
-  { id: 'tjanster', fa: 'خدمات و دارالترجمه', icon: 'Briefcase', enabled: true, isSystem: true, order: 3 },
-  { id: 'jobb', fa: 'کار و استخدام', icon: 'GraduationCap', enabled: true, isSystem: true, order: 4 },
+  { id: 'bostad', fa: 'مسکن', icon: 'Home', enabled: true, isSystem: true, order: 1 },
+  { id: 'restaurang', fa: 'رستوران', icon: 'Utensils', enabled: true, isSystem: true, order: 2 },
+  { id: 'tjanster', fa: 'خدمات', icon: 'Briefcase', enabled: true, isSystem: true, order: 3 },
+  { id: 'jobb', fa: 'استخدام', icon: 'GraduationCap', enabled: true, isSystem: true, order: 4 },
   { id: 'kop-salj', fa: 'خرید و فروش', icon: 'ShoppingBag', enabled: true, isSystem: true, order: 5 },
-  { id: 'fordon', fa: 'خودرو و وسایل نقلیه', icon: 'Car', enabled: true, isSystem: true, order: 6 },
-  { id: 'evenemang', fa: 'رویدادها و مراسم', icon: 'Calendar', enabled: true, isSystem: true, order: 7 },
-  { id: 'ovrigt', fa: 'سایر نیازمندی‌ها', icon: 'Tag', enabled: true, isSystem: true, order: 8 },
+  { id: 'fordon', fa: 'خودرو', icon: 'Car', enabled: true, isSystem: true, order: 6 },
+  { id: 'evenemang', fa: 'رویدادها', icon: 'Calendar', enabled: true, isSystem: true, order: 7 },
+  { id: 'ovrigt', fa: 'سایر', icon: 'Tag', enabled: true, isSystem: true, order: 8 },
 ];
 
 export default function AdminPanel({ onClose, onRefreshAds }) {
