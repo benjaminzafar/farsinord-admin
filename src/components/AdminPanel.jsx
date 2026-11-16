@@ -223,14 +223,8 @@ const DEFAULT_CATEGORIES = [
 ];
 
 export default function AdminPanel({ onClose, onRefreshAds }) {
-  // Authentication with localStorage session persistence so refresh does NOT kick admin out
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    try {
-      return localStorage.getItem('swedpersiska_admin_auth') === 'true';
-    } catch {
-      return false;
-    }
-  });
+  // Authentication with signed token session persistence
+  const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(adminApi.getToken()));
   const [adminEmailInput, setAdminEmailInput] = useState('swedpersiska@gmail.com');
   const [adminPassInput, setAdminPassInput] = useState('');
   const [loginError, setLoginError] = useState('');
@@ -449,6 +443,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     try {
       // Try Secure Serverless Admin API first
       const apiRes = await adminApi.request('overview');
+      if (apiRes && apiRes.unauthorized) {
+        setIsAuthenticated(false);
+        return;
+      }
       if (apiRes && apiRes.ok) {
         setCounts(apiRes.counts);
         setCountryStats(apiRes.countryStats);
@@ -526,6 +524,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     setActiveLoading(true);
     try {
       const apiRes = await adminApi.request('active_ads', { page, search, country, category: cat });
+      if (apiRes && apiRes.unauthorized) {
+        setIsAuthenticated(false);
+        return;
+      }
       if (apiRes && apiRes.ok) {
         setActiveAds(apiRes.ads || []);
         setActiveTotalCount(apiRes.count ?? 0);
@@ -575,6 +577,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     setArchiveLoading(true);
     try {
       const apiRes = await adminApi.request('archive_ads', { page });
+      if (apiRes && apiRes.unauthorized) {
+        setIsAuthenticated(false);
+        return;
+      }
       if (apiRes && apiRes.ok) {
         setArchiveAds(apiRes.ads || []);
         setArchiveTotalCount(apiRes.count ?? 0);

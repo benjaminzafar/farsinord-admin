@@ -183,20 +183,7 @@ export const adminApi = {
       if (err.message && err.message.includes('اشتباه')) throw err;
     }
 
-    // Fallback for static preview without serverless runtime
-    const validEmail = (import.meta.env.VITE_ADMIN_EMAIL || 'swedpersiska@gmail.com').toLowerCase().trim();
-    const validPass = import.meta.env.VITE_ADMIN_PASSWORD || 'Sam@13321332';
-    const cleanedEmail = String(email || '').trim().toLowerCase();
-    const cleanedPass = String(password || '').trim();
-
-    const isEmailValid = cleanedEmail === validEmail || cleanedEmail === 'swedpersiska@gmail.com' || cleanedEmail === 'admin';
-    const isPassValid = cleanedPass === validPass || cleanedPass === 'Sam@13321332' || cleanedPass === 'swed2026';
-
-    if (!isEmailValid || !isPassValid) {
-      throw new Error('ایمیل یا رمز عبور اشتباه است.');
-    }
-    this.setToken('local-admin-session');
-    return { ok: true, token: 'local-admin-session', email: cleanedEmail };
+    throw new Error('سرویس احراز هویت سرور در دسترس نیست.');
   },
 
   async request(action, payload = {}) {
@@ -215,6 +202,7 @@ export const adminApi = {
         const json = await res.json();
         if (res.status === 401) {
           this.setToken('');
+          return { ok: false, unauthorized: true };
         }
         if (json && json.ok) return json;
       }

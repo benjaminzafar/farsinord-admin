@@ -9,6 +9,13 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const PAGE_SIZE = 10;
 const TOKEN_SECRET = process.env.ADMIN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'swedpersiska-admin-hmac-secret-2026';
 
+function safeEqual(a, b) {
+  const bufA = Buffer.from(String(a || ''), 'utf8');
+  const bufB = Buffer.from(String(b || ''), 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 function createAdminToken(email) {
   const payload = Buffer.from(
     JSON.stringify({
@@ -25,7 +32,7 @@ function verifyAdminToken(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [payload, sig] = token.split('.');
   const expectedSig = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('base64url');
-  if (sig !== expectedSig) return null;
+  if (!safeEqual(sig, expectedSig)) return null;
   try {
     const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (!decoded || decoded.role !== 'admin' || decoded.exp < Date.now()) return null;
@@ -36,8 +43,11 @@ function verifyAdminToken(token) {
 }
 
 function setCorsHeaders(req, res) {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
@@ -63,8 +73,8 @@ export default async function handler(req, res) {
       const validEmail = (process.env.ADMIN_EMAIL || process.env.VITE_ADMIN_EMAIL || 'swedpersiska@gmail.com').toLowerCase().trim();
       const validPass = process.env.ADMIN_PASSWORD || process.env.VITE_ADMIN_PASSWORD || 'Sam@13321332';
 
-      const isEmailValid = email === validEmail || email === 'swedpersiska@gmail.com' || email === 'admin';
-      const isPassValid = password === validPass || password === 'Sam@13321332' || password === 'swed2026';
+      const isEmailValid = safeEqual(email, validEmail);
+      const isPassValid = safeEqual(password, validPass);
 
       if (!isEmailValid || !isPassValid) {
         return res.status(401).json({ ok: false, error: 'ایمیل یا رمز عبور اشتباه است.' });
