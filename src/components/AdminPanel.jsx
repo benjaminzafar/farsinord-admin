@@ -57,7 +57,7 @@ import {
 } from 'lucide-react';
 import CloudflareTurnstile from './CloudflareTurnstile';
 import { supabase } from '../lib/supabase';
-import { adminApi } from '../lib/apiClient';
+import { adminApi, getMainSiteUrl } from '../lib/apiClient';
 import { CATEGORIES, COUNTRIES } from '../lib/translations';
 
 // Architecture Constant: Maximum 10 records per view (Minimal Data Loading Rule)
@@ -781,40 +781,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       if (onRefreshAds) onRefreshAds();
     } catch (err) {
       alert('خطا در تغییر وضعیت VIP: ' + err.message);
-    }
-  };
-
-  // Toggle status helper for modal action button
-  const toggleStatus = async (ad) => {
-    if (!ad) return;
-    playFeedback('status');
-    const isActivating = ad.status !== 'active';
-    const nextStatus = isActivating ? 'active' : 'hidden';
-    try {
-      const apiRes = await adminApi.request(isActivating ? 'restore_ad' : 'archive_ad', { id: ad.id });
-      if (!apiRes) {
-        const { error } = await supabase
-          .from('swedpersiska_ads')
-          .update({ status: nextStatus })
-          .eq('id', ad.id);
-        if (error) throw error;
-      }
-      if (isActivating) {
-        setActiveTotalCount(prev => prev + 1);
-        setCounts(prev => ({ ...prev, active: prev.active + 1 }));
-      } else {
-        setActiveAds(prev => prev.filter(a => a.id !== ad.id));
-        setRecentActiveAds(prev => prev.filter(a => a.id !== ad.id));
-        setActiveTotalCount(prev => Math.max(0, prev - 1));
-        setCounts(prev => ({ ...prev, active: Math.max(0, prev.active - 1) }));
-      }
-      if (selectedAdForModal && selectedAdForModal.id === ad.id) {
-        setSelectedAdForModal(prev => ({ ...prev, status: nextStatus }));
-      }
-      triggerToast(isActivating ? 'آگهی فعال و منتشر شد.' : 'آگهی مخفی شد.');
-      if (onRefreshAds) onRefreshAds();
-    } catch (err) {
-      alert('خطا در تغییر وضعیت آگهی: ' + err.message);
     }
   };
 
@@ -3389,37 +3355,24 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-stone-100 bg-stone-50/70">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-extrabold text-[15px] text-stone-900">
+            <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-3.5 sm:py-4 border-b border-stone-100 bg-stone-50/70">
+              <div className="flex items-center gap-2 flex-wrap min-w-0">
+                <span className="font-extrabold text-[14.5px] sm:text-[15px] text-stone-900">
                   جزئیات کامل آگهی
                 </span>
-                <span dir="ltr" className="inline-flex items-center font-mono text-xs font-bold text-stone-700 bg-stone-200/80 px-2 py-0.5 rounded">
+                <span dir="ltr" className="inline-flex items-center font-mono text-xs font-bold text-stone-700 bg-stone-200/80 px-2 py-0.5 rounded whitespace-nowrap">
                   <span>#</span>
                   <span>{selectedAdForModal.reference_number || selectedAdForModal.id.slice(0, 8)}</span>
                 </span>
-                <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold border border-blue-200">
+                <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold border border-blue-200 whitespace-nowrap">
                   {COUNTRIES.find(c => c.id === (selectedAdForModal.country || 'se'))?.nameFa}
-                </span>
-                {selectedAdForModal.is_featured && (
-                  <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 text-[11px] font-extrabold border border-amber-300 flex items-center gap-1">
-                    <Sparkles size={11} className="text-amber-600" />
-                    <span>آگهی ویژه</span>
-                  </span>
-                )}
-                <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${
-                  selectedAdForModal.status === 'active'
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    : 'bg-stone-100 text-stone-600 border-stone-200'
-                }`}>
-                  {selectedAdForModal.status === 'active' ? 'فعال' : 'مخفی'}
                 </span>
               </div>
 
               <button
                 type="button"
                 onClick={() => setSelectedAdForModal(null)}
-                className="h-8 w-8 rounded-full bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-500 hover:text-stone-800 transition-colors cursor-pointer"
+                className="h-8 w-8 shrink-0 rounded-full bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-500 hover:text-stone-800 transition-colors cursor-pointer"
                 title="بستن پنجره"
               >
                 <X size={16} />
@@ -3427,12 +3380,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             </div>
 
             {/* Modal Body (Natural internal scroll) */}
-            <div className="overflow-y-auto no-scrollbar p-5 sm:p-6 space-y-5 flex-1">
+            <div className="overflow-y-auto no-scrollbar p-4 sm:p-6 space-y-4 sm:space-y-5 flex-1">
               
               {/* Photo Preview / Gallery */}
               {selectedAdForModal.images && selectedAdForModal.images.length > 0 ? (
                 <div className="space-y-2">
-                  <div className="w-full h-64 sm:h-72 rounded-2xl overflow-hidden bg-stone-100 border border-stone-200 shadow-2xs">
+                  <div className="w-full h-52 sm:h-72 rounded-2xl overflow-hidden bg-stone-100 border border-stone-200 shadow-2xs">
                     <img 
                       src={selectedAdForModal.images[0]} 
                       alt="" 
@@ -3584,7 +3537,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               {/* Quick Country Switcher */}
               <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <span className="text-xs font-bold text-stone-600">تغییر کشور آگهی:</span>
-                <div className="inline-flex rounded-xl border border-stone-200 bg-white p-1 gap-1">
+                <div className="grid grid-cols-2 sm:inline-flex rounded-xl border border-stone-200 bg-white p-1 gap-1">
                   {COUNTRIES.map(c => {
                     const isCurrent = (selectedAdForModal.country || 'se') === c.id;
                     return (
@@ -3592,7 +3545,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                         key={c.id}
                         type="button"
                         onClick={() => updateAdCountry(selectedAdForModal.id, c.id)}
-                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        className={`px-3 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                           isCurrent
                             ? 'bg-slate-900 text-white shadow-2xs'
                             : 'text-stone-600 hover:text-stone-950 hover:bg-stone-100'
@@ -3608,41 +3561,16 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             </div>
 
             {/* Modal Footer Actions */}
-            <div className="px-5 sm:px-6 py-4 bg-stone-50 border-t border-stone-100 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                {/* Toggle VIP */}
-                <button
-                  type="button"
-                  onClick={() => toggleFeatured(selectedAdForModal)}
-                  className={`h-9 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
-                    selectedAdForModal.is_featured
-                      ? 'bg-amber-50 text-amber-800 border-amber-300'
-                      : 'bg-white hover:bg-stone-100 text-stone-700 border-stone-200'
-                  }`}
-                >
-                  <Sparkles size={14} className={selectedAdForModal.is_featured ? 'text-amber-600' : 'text-stone-400'} />
-                  <span>{selectedAdForModal.is_featured ? 'آگهی ویژه است' : 'تبدیل به ویژه'}</span>
-                </button>
-
-                {/* Toggle Status */}
-                <button
-                  type="button"
-                  onClick={() => toggleStatus(selectedAdForModal)}
-                  className={`h-9 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
-                    selectedAdForModal.status === 'active'
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                      : 'bg-stone-100 text-stone-700 border-stone-300'
-                  }`}
-                >
-                  <CheckCircle size={14} className={selectedAdForModal.status === 'active' ? 'text-emerald-600' : 'text-stone-400'} />
-                  <span>{selectedAdForModal.status === 'active' ? 'آگهی فعال است' : 'آگهی مخفی است'}</span>
-                </button>
-
+            <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-stone-50 border-t border-stone-100 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
                 {/* View on Site */}
                 <button
                   type="button"
-                  onClick={() => window.open(`?ad=${selectedAdForModal.reference_number || selectedAdForModal.id}`, '_blank')}
-                  className="h-9 px-3 rounded-xl border border-stone-200 bg-white hover:bg-stone-100 text-stone-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+                  onClick={() => {
+                    const base = (getMainSiteUrl() || 'https://swedpersiska.vercel.app').replace(/\/+$/, '');
+                    window.open(`${base}/?ad=${selectedAdForModal.reference_number || selectedAdForModal.id}`, '_blank', 'noopener,noreferrer');
+                  }}
+                  className="flex-1 sm:flex-initial h-10 sm:h-9 px-3.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-100 text-stone-700 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all whitespace-nowrap"
                 >
                   <ExternalLink size={14} />
                   <span>مشاهده در سایت</span>
@@ -3652,7 +3580,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 <button
                   type="button"
                   onClick={() => deleteAdAdmin(selectedAdForModal.id)}
-                  className="h-9 px-3 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+                  className="flex-1 sm:flex-initial h-10 sm:h-9 px-3.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all whitespace-nowrap"
                 >
                   <Trash2 size={14} />
                   <span>حذف آگهی</span>
@@ -3662,7 +3590,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               <button
                 type="button"
                 onClick={() => setSelectedAdForModal(null)}
-                className="h-9 px-4 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-800 text-xs font-bold cursor-pointer transition-colors"
+                className="w-full sm:w-auto h-10 sm:h-9 px-5 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-800 text-xs font-bold cursor-pointer transition-colors"
               >
                 بستن
               </button>
