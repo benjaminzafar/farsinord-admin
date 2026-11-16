@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   LayoutGrid,
   Layers, 
@@ -1127,23 +1127,25 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const vipAds = counts.vip;
   const totalViews = counts.totalViews;
 
-  // Filtered categories
-  const filteredCategories = categoriesList.filter(cat => {
+  // Filtered categories (memoized for snappy UI)
+  const filteredCategories = useMemo(() => {
     const q = categorySearchQuery.toLowerCase().trim();
-    const matchSearch = !q || 
-      cat.fa.toLowerCase().includes(q) || 
-      cat.id.toLowerCase().includes(q) ||
-      (cat.icon && cat.icon.toLowerCase().includes(q));
+    return categoriesList.filter(cat => {
+      const matchSearch = !q ||
+        cat.fa.toLowerCase().includes(q) ||
+        cat.id.toLowerCase().includes(q) ||
+        (cat.icon && cat.icon.toLowerCase().includes(q));
 
-    const count = categoryCounts[cat.id] || 0;
-    const matchStatus = 
-      categoryStatusFilter === 'all' ||
-      (categoryStatusFilter === 'active' && cat.enabled !== false) ||
-      (categoryStatusFilter === 'disabled' && cat.enabled === false) ||
-      (categoryStatusFilter === 'has_ads' && count > 0);
+      const count = categoryCounts[cat.id] || 0;
+      const matchStatus =
+        categoryStatusFilter === 'all' ||
+        (categoryStatusFilter === 'active' && cat.enabled !== false) ||
+        (categoryStatusFilter === 'disabled' && cat.enabled === false) ||
+        (categoryStatusFilter === 'has_ads' && count > 0);
 
-    return matchSearch && matchStatus;
-  });
+      return matchSearch && matchStatus;
+    });
+  }, [categoriesList, categorySearchQuery, categoryStatusFilter, categoryCounts]);
 
   const topCategory = categoriesList.reduce((top, cat) => {
     const count = categoryCounts[cat.id] || 0;
