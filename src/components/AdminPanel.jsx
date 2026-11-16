@@ -3,8 +3,6 @@ import {
   LayoutGrid,
   Layers, 
   Layers3,
-  Archive,
-  ArchiveRestore,
   ChevronLeft,
   ChevronRight,
   SlidersHorizontal,
@@ -230,10 +228,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [loginError, setLoginError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Active view: 'overview' | 'ads' | 'archive' | 'categories' | 'monetization' | 'security' | 'settings' with URL & localStorage persistence
+  // Active view: 'overview' | 'ads' | 'categories' | 'monetization' | 'security' | 'settings' with URL & localStorage persistence
   const [activeTab, setActiveTab] = useState(() => {
     try {
-      const validTabs = ['overview', 'ads', 'archive', 'categories', 'monetization', 'security', 'settings'];
+      const validTabs = ['overview', 'ads', 'categories', 'monetization', 'security', 'settings'];
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
       if (tabParam && validTabs.includes(tabParam)) {
@@ -252,9 +250,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     playFeedback('click');
     setActiveTab(tab);
     setMobileSidebarOpen(false);
-    if (tab === 'archive' && !archiveLoaded) {
-      fetchArchiveAds(1);
-    }
     try {
       localStorage.setItem('swedpersiska_admin_tab', tab);
       const url = new URL(window.location.href);
@@ -294,7 +289,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     total: 0,
     active: 0,
     vip: 0,
-    archive: 0,
     totalViews: 0
   });
   const [countryStats, setCountryStats] = useState({
@@ -311,13 +305,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [activeTotalCount, setActiveTotalCount] = useState(0);
   const [activePage, setActivePage] = useState(1);
   const [activeLoading, setActiveLoading] = useState(false);
-
-  // Archive & Historical Ads Tab State (Lazy-loaded, 10 records page size)
-  const [archiveAds, setArchiveAds] = useState([]);
-  const [archiveTotalCount, setArchiveTotalCount] = useState(0);
-  const [archivePage, setArchivePage] = useState(1);
-  const [archiveLoading, setArchiveLoading] = useState(false);
-  const [archiveLoaded, setArchiveLoaded] = useState(false);
 
   // Filters for Active Ads
   const [searchQuery, setSearchQuery] = useState('');
@@ -457,11 +444,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         return;
       }
 
-      const [totalRes, activeRes, vipRes, archiveRes, recentRes, metaRes, settingsRes] = await Promise.all([
+      const [totalRes, activeRes, vipRes, recentRes, metaRes, settingsRes] = await Promise.all([
         supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }),
         supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('status', 'active'),
         supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('is_featured', true),
-        supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).neq('status', 'active'),
         supabase.from('swedpersiska_ads').select('*').eq('status', 'active').order('created_at', { ascending: false }).limit(5),
         supabase.from('swedpersiska_ads').select('category, country, status, is_featured, views_count'),
         supabase.from('swedpersiska_settings').select('*')
@@ -470,7 +456,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       const tot = totalRes.count ?? 0;
       const act = activeRes.count ?? 0;
       const vip = vipRes.count ?? 0;
-      const arc = archiveRes.count ?? 0;
 
       // Compute aggregates
       const cStats = {
@@ -500,7 +485,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         total: tot,
         active: act,
         vip: vip,
-        archive: arc,
         totalViews: totalV
       });
       setCountryStats(cStats);
@@ -569,46 +553,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       console.error('Error fetching active ads:', err);
     } finally {
       setActiveLoading(false);
-    }
-  };
-
-  // 3. Lazy-Load Archive Ads with Server-side Pagination (10 records limit)
-  const fetchArchiveAds = async (page = 1) => {
-    setArchiveLoading(true);
-    try {
-      const apiRes = await adminApi.request('archive_ads', { page });
-      if (apiRes && apiRes.unauthorized) {
-        setIsAuthenticated(false);
-        return;
-      }
-      if (apiRes && apiRes.ok) {
-        setArchiveAds(apiRes.ads || []);
-        setArchiveTotalCount(apiRes.count ?? 0);
-        setArchivePage(page);
-        setArchiveLoaded(true);
-        return;
-      }
-
-      const from = (page - 1) * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
-
-      const { data, count, error } = await supabase
-        .from('swedpersiska_ads')
-        .select('*', { count: 'exact' })
-        .neq('status', 'active')
-        .order('created_at', { ascending: false })
-        .range(from, to);
-
-      if (error) throw error;
-
-      setArchiveAds(data || []);
-      setArchiveTotalCount(count ?? 0);
-      setArchivePage(page);
-      setArchiveLoaded(true);
-    } catch (err) {
-      console.error('Error fetching archive ads:', err);
-    } finally {
-      setArchiveLoading(false);
     }
   };
 
@@ -790,13 +734,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   }, [isAuthenticated]);
 
-  // Lazy-load archive when archive tab is opened
-  useEffect(() => {
-    if (isAuthenticated && activeTab === 'archive' && !archiveLoaded) {
-      fetchArchiveAds(1);
-    }
-  }, [isAuthenticated, activeTab, archiveLoaded]);
-
   // Update country of an ad
   const updateAdCountry = async (adId, newCountry) => {
     playFeedback('click');
@@ -811,7 +748,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       }
       setActiveAds(prev => prev.map(a => a.id === adId ? { ...a, country: newCountry } : a));
       setRecentActiveAds(prev => prev.map(a => a.id === adId ? { ...a, country: newCountry } : a));
-      setArchiveAds(prev => prev.map(a => a.id === adId ? { ...a, country: newCountry } : a));
       setSelectedAdForModal(prev => prev && prev.id === adId ? { ...prev, country: newCountry } : prev);
       const countryObj = COUNTRIES.find(c => c.id === newCountry) || COUNTRIES[0];
       triggerToast(`کشور آگهی به ${countryObj.nameFa} تغییر یافت.`);
@@ -836,7 +772,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       }
       setActiveAds(prev => prev.map(a => a.id === ad.id ? { ...a, is_featured: nextVal } : a));
       setRecentActiveAds(prev => prev.map(a => a.id === ad.id ? { ...a, is_featured: nextVal } : a));
-      setArchiveAds(prev => prev.map(a => a.id === ad.id ? { ...a, is_featured: nextVal } : a));
       setSelectedAdForModal(prev => prev && prev.id === ad.id ? { ...prev, is_featured: nextVal } : prev);
       setCounts(prev => ({
         ...prev,
@@ -849,75 +784,38 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   };
 
-  // Move active ad to Archive (Rule #2: Separate active data from historical data)
-  const archiveAd = async (ad) => {
-    playFeedback('status');
-    try {
-      const apiRes = await adminApi.request('archive_ad', { id: ad.id });
-      if (!apiRes) {
-        const { error } = await supabase
-          .from('swedpersiska_ads')
-          .update({ status: 'hidden' })
-          .eq('id', ad.id);
-        if (error) throw error;
-      }
-      setActiveAds(prev => prev.filter(a => a.id !== ad.id));
-      setRecentActiveAds(prev => prev.filter(a => a.id !== ad.id));
-      setActiveTotalCount(prev => Math.max(0, prev - 1));
-      setArchiveTotalCount(prev => prev + 1);
-      setCounts(prev => ({
-        ...prev,
-        active: Math.max(0, prev.active - 1),
-        archive: prev.archive + 1
-      }));
-      setArchiveLoaded(false); // will re-sync next time archive tab is clicked
-      if (selectedAdForModal && selectedAdForModal.id === ad.id) {
-        setSelectedAdForModal(prev => ({ ...prev, status: 'hidden' }));
-      }
-      triggerToast('آگهی به بایگانی و تاریخچه منتقل شد.');
-      if (onRefreshAds) onRefreshAds();
-    } catch (err) {
-      alert('خطا در انتقال به بایگانی: ' + err.message);
-    }
-  };
-
-  // Restore archived ad back to Active
-  const restoreAd = async (ad) => {
-    playFeedback('status');
-    try {
-      const apiRes = await adminApi.request('restore_ad', { id: ad.id });
-      if (!apiRes) {
-        const { error } = await supabase
-          .from('swedpersiska_ads')
-          .update({ status: 'active' })
-          .eq('id', ad.id);
-        if (error) throw error;
-      }
-      setArchiveAds(prev => prev.filter(a => a.id !== ad.id));
-      setArchiveTotalCount(prev => Math.max(0, prev - 1));
-      setActiveTotalCount(prev => prev + 1);
-      setCounts(prev => ({
-        ...prev,
-        active: prev.active + 1,
-        archive: Math.max(0, prev.archive - 1)
-      }));
-      if (selectedAdForModal && selectedAdForModal.id === ad.id) {
-        setSelectedAdForModal(prev => ({ ...prev, status: 'active' }));
-      }
-      triggerToast('آگهی بازیابی شد و در پرتال منتشر گردید.');
-      if (onRefreshAds) onRefreshAds();
-    } catch (err) {
-      alert('خطا در بازیابی آگهی: ' + err.message);
-    }
-  };
-
   // Toggle status helper for modal action button
-  const toggleStatus = (ad) => {
+  const toggleStatus = async (ad) => {
     if (!ad) return;
-    if (ad.status === 'active') {
-      return archiveAd(ad);
+    playFeedback('status');
+    const isActivating = ad.status !== 'active';
+    const nextStatus = isActivating ? 'active' : 'hidden';
+    try {
+      const apiRes = await adminApi.request(isActivating ? 'restore_ad' : 'archive_ad', { id: ad.id });
+      if (!apiRes) {
+        const { error } = await supabase
+          .from('swedpersiska_ads')
+          .update({ status: nextStatus })
+          .eq('id', ad.id);
+        if (error) throw error;
+      }
+      if (isActivating) {
+        setActiveTotalCount(prev => prev + 1);
+        setCounts(prev => ({ ...prev, active: prev.active + 1 }));
+      } else {
+        setActiveAds(prev => prev.filter(a => a.id !== ad.id));
+        setRecentActiveAds(prev => prev.filter(a => a.id !== ad.id));
+        setActiveTotalCount(prev => Math.max(0, prev - 1));
+        setCounts(prev => ({ ...prev, active: Math.max(0, prev.active - 1) }));
+      }
+      if (selectedAdForModal && selectedAdForModal.id === ad.id) {
+        setSelectedAdForModal(prev => ({ ...prev, status: nextStatus }));
+      }
+      triggerToast(isActivating ? 'آگهی فعال و منتشر شد.' : 'آگهی مخفی شد.');
+      if (onRefreshAds) onRefreshAds();
+    } catch (err) {
+      alert('خطا در تغییر وضعیت آگهی: ' + err.message);
     }
-    return restoreAd(ad);
   };
 
   // Permanent Delete
@@ -937,7 +835,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       }
       setActiveAds(prev => prev.filter(a => a.id !== id));
       setRecentActiveAds(prev => prev.filter(a => a.id !== id));
-      setArchiveAds(prev => prev.filter(a => a.id !== id));
       setCounts(prev => ({
         ...prev,
         total: Math.max(0, prev.total - 1),
@@ -1399,33 +1296,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 )}
               </button>
 
-              {/* Archive & History (Lazy-loaded, Rule #2 & #4) */}
-              <button
-                type="button"
-                onClick={() => handleTabChange('archive')}
-                className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.99] cursor-pointer group ${
-                  activeTab === 'archive'
-                    ? 'bg-white text-slate-950 shadow-md font-bold'
-                    : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                    activeTab === 'archive' ? 'bg-slate-700 text-white shadow-sm' : 'bg-white/10 text-stone-300 group-hover:text-stone-100 group-hover:bg-white/15'
-                  }`}>
-                    <Archive size={17} strokeWidth={activeTab === 'archive' ? 2.3 : 1.9} />
-                  </div>
-                  <span className="truncate">بایگانی و تاریخچه</span>
-                </div>
-                {counts.archive > 0 && (
-                  <span className={`flex h-6 min-w-[26px] items-center justify-center rounded-lg px-2 text-[11px] tabular-nums font-bold ${
-                    activeTab === 'archive' ? 'bg-slate-900 text-white' : 'bg-white/10 text-stone-300 border border-white/15'
-                  }`}>
-                    {counts.archive}
-                  </span>
-                )}
-              </button>
-
               <button
                 type="button"
                 onClick={() => handleTabChange('categories')}
@@ -1586,11 +1456,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-3.5 space-y-1.5">
+            <div className="flex-1 overflow-y-auto no-scrollbar p-3.5 space-y-1.5">
               {[
                 { id: 'overview', label: 'داشبورد', icon: LayoutGrid, badge: null, color: 'bg-slate-950' },
                 { id: 'ads', label: 'آگهی‌های فعال', icon: Layers3, badge: counts.active, color: 'bg-blue-600' },
-                { id: 'archive', label: 'بایگانی و تاریخچه', icon: Archive, badge: counts.archive, color: 'bg-slate-700' },
                 { id: 'categories', label: 'دسته‌بندی‌ها', icon: Shapes, badge: categoriesList.length, color: 'bg-emerald-600' },
                 { id: 'monetization', label: 'درگاه پرداخت', icon: WalletCards, badge: 'تعرفه', color: 'bg-amber-600' },
                 { id: 'security', label: 'امنیت سیستم', icon: ShieldCheck, badge: turnstileSettings.enabled ? 'فعال' : 'غیرفعال', color: 'bg-cyan-600' },
@@ -1657,7 +1526,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       {/* ========================================================
           2. MAIN SCROLLABLE CONTENT AREA (INDEPENDENT FROM SIDEBAR)
       ======================================================== */}
-      <div className="flex-1 w-full h-full overflow-y-auto overflow-x-hidden flex flex-col min-w-0 px-2.5 pb-8 sm:px-4 lg:px-0 lg:pb-8">
+      <div className="flex-1 w-full h-full overflow-y-auto overflow-x-hidden no-scrollbar flex flex-col min-w-0 px-2.5 pb-8 sm:px-4 lg:px-0 lg:pb-8">
         
         {/* Top Desktop Nav Bar */}
         <header className="hidden lg:flex items-center justify-between h-[68px] px-5 bg-white rounded-2xl border border-stone-200/90 shadow-[0_2px_12px_rgba(0,0,0,0.03)] mb-5 sticky top-0 shrink-0 z-20 select-none gap-4">
@@ -1666,7 +1535,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-stone-100 text-stone-800 border border-stone-200/90 shadow-sm shrink-0">
               {activeTab === 'overview' && <LayoutGrid size={19} className="text-slate-900" />}
               {activeTab === 'ads' && <Layers3 size={19} className="text-blue-600" />}
-              {activeTab === 'archive' && <Archive size={19} className="text-slate-700" />}
               {activeTab === 'categories' && <Shapes size={19} className="text-emerald-600" />}
               {activeTab === 'monetization' && <WalletCards size={19} className="text-amber-600" />}
               {activeTab === 'security' && <ShieldCheck size={19} className="text-cyan-600" />}
@@ -1676,7 +1544,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               <span className="font-black text-stone-900 tracking-tight text-[15.5px] leading-tight">
                 {activeTab === 'overview' && 'داشبورد مدیریت'}
                 {activeTab === 'ads' && 'مدیریت آگهی‌های فعال'}
-                {activeTab === 'archive' && 'بایگانی و تاریخچه آگهی‌ها'}
                 {activeTab === 'categories' && 'مدیریت دسته‌بندی‌ها'}
                 {activeTab === 'monetization' && 'درگاه پرداخت و تعرفه‌ها'}
                 {activeTab === 'security' && 'امنیت و فایروال'}
@@ -1751,7 +1618,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 <span className="font-bold text-[14.5px] text-stone-900 tracking-tight truncate block max-w-[150px] sm:max-w-xs">
                   {activeTab === 'overview' && 'داشبورد'}
                   {activeTab === 'ads' && 'آگهی‌های فعال'}
-                  {activeTab === 'archive' && 'بایگانی و تاریخچه'}
                   {activeTab === 'categories' && 'دسته‌بندی‌ها'}
                   {activeTab === 'monetization' && 'درگاه پرداخت'}
                   {activeTab === 'security' && 'امنیت سیستم'}
@@ -1819,7 +1685,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   <div className="mt-3 flex items-center justify-between text-[11.5px] text-stone-500 border-t border-stone-100 pt-2.5">
                     <span>در سراسر کشورهای نوردیک</span>
                     <span className="font-semibold text-stone-700">
-                      <span className="tabular-nums font-bold">{counts.archive}</span> در بایگانی
+                      <span className="tabular-nums font-bold">{activeAdsCount}</span> در حال نمایش
                     </span>
                   </div>
                 </div>
@@ -2076,16 +1942,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                               title={ad.is_featured ? 'حذف نشان ویژه' : 'ارتقا به ویژه'}
                             >
                               <Sparkles size={14} className={ad.is_featured ? 'text-amber-600' : 'text-stone-400'} />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => archiveAd(ad)}
-                              className="flex-1 sm:flex-initial h-9 px-3 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 text-stone-600 flex items-center justify-center gap-1.5 text-[11px] font-bold cursor-pointer transition-all active:scale-95 whitespace-nowrap"
-                              title="انتقال به بایگانی و تاریخچه"
-                            >
-                              <Archive size={13} className="text-stone-500" />
-                              <span>بایگانی</span>
                             </button>
                           </div>
                         </div>
@@ -2392,45 +2248,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                               </div>
                             </div>
 
-                            <div className="flex items-center justify-between flex-wrap gap-2 text-[11px] bg-stone-50/80 px-2.5 py-2 rounded-xl border border-stone-200/60">
-                              <span className="inline-flex items-center gap-1 text-stone-800 font-bold truncate max-w-[140px]">
-                                <User size={12} className="text-stone-400 shrink-0" />
-                                {ad.contact_name || 'بدون نام'}
-                              </span>
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {ad.contact_phone && (
-                                  <a
-                                    href={`tel:${ad.contact_phone}`}
-                                    className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200/60"
-                                  >
-                                    <Phone size={10} />
-                                    <span dir="ltr">{ad.contact_phone}</span>
-                                  </a>
-                                )}
-                                {ad.contact_whatsapp && (
-                                  <a
-                                    href={`https://wa.me/${ad.contact_whatsapp.replace(/[^0-9]/g, '')}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="h-6 px-2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center text-[10px] font-bold"
-                                  >
-                                    واتساپ
-                                  </a>
-                                )}
-                                {ad.contact_telegram && (
-                                  <a
-                                    href={`https://t.me/${ad.contact_telegram.replace('@', '')}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="h-6 w-6 rounded bg-sky-50 text-sky-700 border border-sky-200 inline-flex items-center justify-center"
-                                    title="تلگرام"
-                                  >
-                                    <Send size={10} />
-                                  </a>
-                                )}
-                              </div>
-                            </div>
-
                             <div className="flex items-center gap-2 pt-1">
                               <button
                                 type="button"
@@ -2454,14 +2271,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => archiveAd(ad)}
-                                className="flex-1 h-9 px-3 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 text-stone-600 flex items-center justify-center gap-1.5 text-[11px] font-bold cursor-pointer active:scale-95"
-                              >
-                                <Archive size={13} className="text-stone-500" />
-                                <span>بایگانی</span>
-                              </button>
-                              <button
-                                type="button"
                                 onClick={() => deleteAdAdmin(ad.id)}
                                 className="h-9 w-9 shrink-0 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 flex items-center justify-center cursor-pointer active:scale-95"
                                 title="حذف دائمی آگهی"
@@ -2475,7 +2284,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     </div>
 
                     {/* Desktop Table View (>= md) */}
-                    <div className="hidden md:block overflow-x-auto">
+                    <div className="hidden md:block overflow-x-auto no-scrollbar">
                     <table className="w-full text-right border-collapse">
                       <thead>
                         <tr className="bg-stone-50/90 border-b border-stone-200/80 text-[11.5px] font-bold text-stone-500 select-none">
@@ -2483,10 +2292,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                           <th className="py-3 px-3 min-w-[130px]">شناسه و رمز</th>
                           <th className="py-3 px-3 min-w-[220px]">عنوان و دسته‌بندی</th>
                           <th className="py-3 px-3 min-w-[120px]">شهر و قیمت</th>
-                          <th className="py-3 px-3 min-w-[180px]">اطلاعات تماس</th>
                           <th className="py-3 px-3 text-center w-20">بازدید</th>
                           <th className="py-3 px-3 text-center w-24">وضعیت</th>
-                          <th className="py-3 px-3 text-center min-w-[170px]">عملیات</th>
+                          <th className="py-3 px-3 text-center min-w-[140px]">عملیات</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-100 text-xs">
@@ -2589,60 +2397,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                 </div>
                               </td>
 
-                              {/* 5. Contact Information */}
-                              <td className="py-2.5 px-3 align-middle">
-                                <div className="space-y-1">
-                                  <div className="flex items-center gap-1 text-stone-800 font-bold text-[11.5px]">
-                                    <User size={12} className="text-stone-400 shrink-0" />
-                                    <span className="truncate max-w-[120px]">{ad.contact_name || 'بدون نام'}</span>
-                                  </div>
-                                  <div className="flex items-center gap-1.5">
-                                    {ad.contact_phone && (
-                                      <a
-                                        href={`tel:${ad.contact_phone}`}
-                                        className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-blue-700 hover:underline bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200/60"
-                                        title={`تماس تلفنی: ${ad.contact_phone}`}
-                                      >
-                                        <Phone size={10} />
-                                        <span>{ad.contact_phone}</span>
-                                      </a>
-                                    )}
-                                    {ad.contact_whatsapp && (
-                                      <a
-                                        href={`https://wa.me/${ad.contact_whatsapp.replace(/[^0-9]/g, '')}`}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="h-6 px-1.5 rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 flex items-center justify-center text-[10px] font-bold"
-                                        title={`واتساپ: ${ad.contact_whatsapp}`}
-                                      >
-                                        واتساپ
-                                      </a>
-                                    )}
-                                    {ad.contact_telegram && (
-                                      <a
-                                        href={`https://t.me/${ad.contact_telegram.replace('@', '')}`}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="h-6 w-6 rounded bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-200 flex items-center justify-center text-[10px]"
-                                        title={`تلگرام: ${ad.contact_telegram}`}
-                                      >
-                                        <Send size={10} />
-                                      </a>
-                                    )}
-                                    {ad.contact_email && (
-                                      <a
-                                        href={`mailto:${ad.contact_email}`}
-                                        className="h-6 w-6 rounded bg-stone-100 text-stone-600 hover:bg-stone-200 border border-stone-200 flex items-center justify-center text-[10px]"
-                                        title={`ایمیل: ${ad.contact_email}`}
-                                      >
-                                        <Mail size={10} />
-                                      </a>
-                                    )}
-                                  </div>
-                                </div>
-                              </td>
-
-                              {/* 6. Views */}
+                              {/* 5. Views */}
                               <td className="py-2.5 px-3 text-center align-middle">
                                 <span className="inline-flex items-center gap-1 font-mono text-[11.5px] font-semibold text-stone-600 bg-stone-50 px-2 py-0.5 rounded border border-stone-200/60">
                                   <Eye size={11} className="text-stone-400" />
@@ -2693,17 +2448,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                     <Sparkles size={13} className={ad.is_featured ? 'text-amber-600' : 'text-stone-400'} />
                                   </button>
 
-                                  {/* Move to Archive (Rule #2) */}
-                                  <button
-                                    type="button"
-                                    onClick={() => archiveAd(ad)}
-                                    className="h-8 px-2 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 text-stone-600 flex items-center gap-1 text-[11px] font-bold cursor-pointer transition-all active:scale-95"
-                                    title="انتقال آگهی به بخش بایگانی و تاریخچه"
-                                  >
-                                    <Archive size={13} className="text-stone-500" />
-                                    <span>بایگانی</span>
-                                  </button>
-
                                   {/* Delete Ad */}
                                   <button
                                     type="button"
@@ -2731,304 +2475,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   pageSize={PAGE_SIZE}
                   onPageChange={(p) => fetchActiveAds(p, searchQuery, countryFilter, categoryFilter)}
                   loading={activeLoading}
-                />
-              </div>
-
-            </div>
-          )}
-
-          {/* ========================================================
-              TAB: ARCHIVE & HISTORICAL ADS (LAZY LOADED - 10 PER PAGE)
-          ======================================================== */}
-          {activeTab === 'archive' && (
-            <div className="space-y-4 w-full animate-in fade-in duration-150 ease-out">
-              
-              {/* Header Info Tile */}
-              <div className="p-4 sm:p-5 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.03)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-stone-100 text-stone-700 border border-stone-200 shadow-2xs">
-                    <Archive size={22} strokeWidth={2} />
-                  </div>
-                  <div>
-                    <h2 className="text-[16px] font-extrabold text-stone-900 tracking-tight flex items-center gap-2">
-                      <span>بایگانی و تاریخچه آگهی‌ها</span>
-                      <span className="px-2 py-0.5 rounded-full bg-stone-100 text-stone-600 border border-stone-200 text-xs font-bold tabular-nums">
-                        {archiveTotalCount} رکورد
-                      </span>
-                    </h2>
-                    <p className="text-[12px] text-stone-500 mt-0.5">
-                      تفکیک کامل آگهی‌های مخفی، منقضی‌شده و قدیمی از داشبورد فعال (بارگذاری بهینه ۱۰ تایی در تقاضا)
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => fetchArchiveAds(archivePage)}
-                  className="h-9 px-3.5 rounded-xl border border-stone-200 bg-white text-stone-700 hover:text-stone-900 hover:bg-stone-50 text-xs font-semibold flex items-center gap-1.5 active:scale-95 transition-all shadow-2xs cursor-pointer shrink-0"
-                >
-                  <RotateCcw size={13} className={archiveLoading ? 'animate-spin text-blue-600' : 'text-stone-500'} />
-                  <span>بروزرسانی بایگانی</span>
-                </button>
-              </div>
-
-              {/* Archive Table */}
-              <div className="bg-white rounded-2xl border border-stone-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] overflow-hidden">
-                {archiveLoading && archiveAds.length === 0 ? (
-                  <div className="text-center py-20 p-8 text-stone-400 space-y-2">
-                    <RefreshCw size={28} className="mx-auto text-blue-600 animate-spin" />
-                    <p className="text-xs text-stone-500 font-semibold">در حال بارگذاری آگهی‌های بایگانی‌شده از پایگاه داده...</p>
-                  </div>
-                ) : archiveAds.length === 0 ? (
-                  <div className="text-center py-20 p-8 text-stone-400 space-y-2">
-                    <Archive size={36} className="mx-auto text-stone-300" />
-                    <p className="text-sm font-semibold text-stone-600">بایگانی در حال حاضر خالی است.</p>
-                    <p className="text-xs text-stone-400">تمام آگهی‌های ثبت‌شده در پرتال هم‌اکنون فعال و در حال نمایش هستند.</p>
-                  </div>
-                ) : (
-                  <>
-                    {/* Mobile Cards View (< md) */}
-                    <div className="md:hidden divide-y divide-stone-100">
-                      {archiveAds.map(ad => {
-                        const countryObj = COUNTRIES.find(c => c.id === (ad.country || 'se')) || COUNTRIES[0];
-                        const catObj = categoriesList.find(c => c.id === ad.category) || CATEGORIES.find(c => c.id === ad.category);
-                        return (
-                          <div key={`m-arch-${ad.id}`} className="p-3.5 space-y-3 hover:bg-stone-50/70 transition-colors">
-                            <div className="flex items-start gap-3">
-                              <div
-                                onClick={() => setSelectedAdForModal(ad)}
-                                className="w-12 h-12 rounded-xl bg-stone-100 border border-stone-200/80 overflow-hidden shrink-0 cursor-pointer shadow-2xs"
-                              >
-                                {ad.images && ad.images[0] ? (
-                                  <img src={ad.images[0]} alt="" className="w-full h-full object-cover" />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center text-stone-300 bg-stone-50">
-                                    <ImageIcon size={18} />
-                                  </div>
-                                )}
-                              </div>
-                              <div className="min-w-0 flex-1 space-y-1.5">
-                                <div className="flex items-center flex-wrap gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => copyText(ad.reference_number, `m-arch-ref-${ad.id}`, 'کد پیگیری')}
-                                    className="font-mono text-[11px] font-bold text-stone-800 bg-stone-100 px-1.5 py-0.5 rounded border border-stone-200 inline-flex items-center gap-1 whitespace-nowrap"
-                                  >
-                                    <span dir="ltr">#{ad.reference_number || ad.id.slice(0, 8)}</span>
-                                    {copiedKey === `m-arch-ref-${ad.id}` ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} className="text-stone-400" />}
-                                  </button>
-                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-stone-100 text-stone-700 border border-stone-200 whitespace-nowrap">
-                                    {countryObj.nameFa}
-                                  </span>
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-stone-100 text-stone-600 border border-stone-200 whitespace-nowrap">
-                                    بایگانی‌شده
-                                  </span>
-                                </div>
-                                <p
-                                  onClick={() => setSelectedAdForModal(ad)}
-                                  className="font-extrabold text-[13.5px] text-stone-800 hover:text-blue-600 cursor-pointer line-clamp-2 leading-snug"
-                                >
-                                  {ad.title}
-                                </p>
-                                <div className="flex items-center flex-wrap gap-x-2.5 gap-y-1 text-[11px] text-stone-500">
-                                  {catObj && (
-                                    <span className="px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 font-medium text-[10.5px]">
-                                      {catObj.fa}
-                                    </span>
-                                  )}
-                                  <span className="inline-flex items-center gap-1 text-stone-700 font-medium">
-                                    <MapPin size={11} className="text-stone-400" />
-                                    {ad.city || 'نامشخص'}
-                                  </span>
-                                  <span className="font-extrabold text-stone-900 tabular-nums whitespace-nowrap">
-                                    {ad.price ? `${Number(ad.price).toLocaleString()} کرون` : 'توافقی'}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-2 pt-1 border-t border-stone-100">
-                              <button
-                                type="button"
-                                onClick={() => restoreAd(ad)}
-                                className="flex-1 h-9 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                              >
-                                <ArchiveRestore size={13} className="text-emerald-700" />
-                                <span>بازگردانی</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setSelectedAdForModal(ad)}
-                                className="flex-1 h-9 px-3 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                              >
-                                <Eye size={13} className="text-stone-500" />
-                                <span>مشاهده</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteAdAdmin(ad.id)}
-                                className="h-9 w-9 shrink-0 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 flex items-center justify-center cursor-pointer active:scale-95"
-                                title="حذف همیشگی و دائمی"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Desktop Table View (>= md) */}
-                    <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full text-right border-collapse">
-                      <thead>
-                        <tr className="bg-stone-50/90 border-b border-stone-200/80 text-[11.5px] font-bold text-stone-500 select-none">
-                          <th className="py-3 px-3 text-center w-14">تصویر</th>
-                          <th className="py-3 px-3 min-w-[130px]">شناسه و کشور</th>
-                          <th className="py-3 px-3 min-w-[220px]">عنوان و دسته‌بندی</th>
-                          <th className="py-3 px-3 min-w-[120px]">شهر و قیمت</th>
-                          <th className="py-3 px-3 text-center w-24">وضعیت</th>
-                          <th className="py-3 px-3 text-center min-w-[180px]">عملیات</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-stone-100 text-xs">
-                        {archiveAds.map(ad => {
-                          const countryObj = COUNTRIES.find(c => c.id === (ad.country || 'se')) || COUNTRIES[0];
-                          const catObj = categoriesList.find(c => c.id === ad.category) || CATEGORIES.find(c => c.id === ad.category);
-
-                          return (
-                            <tr key={ad.id} className="hover:bg-stone-50/70 transition-colors group">
-                              {/* 1. Thumbnail */}
-                              <td className="py-2.5 px-3 text-center align-middle">
-                                <div 
-                                  onClick={() => setSelectedAdForModal(ad)}
-                                  className="w-11 h-11 rounded-xl bg-stone-100 border border-stone-200/80 overflow-hidden shrink-0 mx-auto cursor-pointer shadow-2xs group-hover:scale-105 transition-transform"
-                                  title="کلیک برای مشاهده جزئیات کامل"
-                                >
-                                  {ad.images && ad.images[0] ? (
-                                    <img src={ad.images[0]} alt="" className="w-full h-full object-cover" />
-                                  ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-stone-300 bg-stone-50">
-                                      <ImageIcon size={18} />
-                                    </div>
-                                  )}
-                                </div>
-                              </td>
-
-                              {/* 2. Reference & Country */}
-                              <td className="py-2.5 px-3 align-middle">
-                                <div className="space-y-1">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <button
-                                      type="button"
-                                      onClick={() => copyText(ad.reference_number, `ref-${ad.id}`, 'کد پیگیری')}
-                                      className="font-mono text-[11px] font-bold text-stone-800 bg-stone-100 hover:bg-stone-200 px-1.5 py-0.5 rounded border border-stone-200 flex items-center gap-1 cursor-pointer transition-colors"
-                                    >
-                                      <span>#{ad.reference_number || ad.id.slice(0, 8)}</span>
-                                      {copiedKey === `ref-${ad.id}` ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} className="text-stone-400" />}
-                                    </button>
-                                    <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-stone-100 text-stone-700 border border-stone-200">
-                                      {countryObj.nameFa}
-                                    </span>
-                                  </div>
-                                </div>
-                              </td>
-
-                              {/* 3. Title & Category */}
-                              <td className="py-2.5 px-3 align-middle">
-                                <div className="min-w-0 max-w-[280px]">
-                                  <span 
-                                    onClick={() => setSelectedAdForModal(ad)}
-                                    className="font-extrabold text-[13px] text-stone-800 hover:text-blue-600 cursor-pointer line-clamp-1 block transition-colors leading-snug"
-                                    title={ad.title}
-                                  >
-                                    {ad.title}
-                                  </span>
-                                  <div className="flex items-center gap-2 mt-1 text-[11px] text-stone-400">
-                                    {catObj && (
-                                      <span className="px-1.5 py-0.2 rounded bg-stone-100 text-stone-600 font-medium text-[10.5px]">
-                                        {catObj.fa}
-                                      </span>
-                                    )}
-                                    <span className="font-mono text-[10px]">
-                                      {new Date(ad.created_at || '2026-01-01').toLocaleDateString('sv-SE')}
-                                    </span>
-                                  </div>
-                                </div>
-                              </td>
-
-                              {/* 4. City & Price */}
-                              <td className="py-2.5 px-3 align-middle">
-                                <div className="space-y-0.5">
-                                  <div className="flex items-center gap-1 text-stone-700 font-medium text-[11.5px]">
-                                    <MapPin size={12} className="text-stone-400 shrink-0" />
-                                    <span>{ad.city || 'نامشخص'}</span>
-                                  </div>
-                                  <span className="font-extrabold text-stone-900 font-mono text-[12px] block">
-                                    {ad.price ? `${Number(ad.price).toLocaleString()} کرون` : 'توافقی'}
-                                  </span>
-                                </div>
-                              </td>
-
-                              {/* 5. Status Badge */}
-                              <td className="py-2.5 px-3 text-center align-middle">
-                                <span className="inline-block px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-stone-100 text-stone-600 border border-stone-200">
-                                  بایگانی‌شده
-                                </span>
-                              </td>
-
-                              {/* 6. Actions */}
-                              <td className="py-2.5 px-3 text-center align-middle">
-                                <div className="flex items-center justify-center gap-1.5">
-                                  {/* Restore back to active */}
-                                  <button
-                                    type="button"
-                                    onClick={() => restoreAd(ad)}
-                                    className="h-8 px-2.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-2xs"
-                                    title="بازگردانی به پرتال اصلی و انتشار مجدد"
-                                  >
-                                    <ArchiveRestore size={13} className="text-emerald-700" />
-                                    <span>بازگردانی</span>
-                                  </button>
-
-                                  {/* View modal */}
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedAdForModal(ad)}
-                                    className="h-8 px-2 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors active:scale-95"
-                                    title="مشاهده جزئیات کامل"
-                                  >
-                                    <Eye size={13} className="text-stone-500" />
-                                    <span>مشاهده</span>
-                                  </button>
-
-                                  {/* Permanent Delete */}
-                                  <button
-                                    type="button"
-                                    onClick={() => deleteAdAdmin(ad.id)}
-                                    className="h-8 w-8 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 flex items-center justify-center cursor-pointer transition-all active:scale-95"
-                                    title="حذف همیشگی و دائمی"
-                                  >
-                                    <Trash2 size={13} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                  </>
-                )}
-
-                {/* Pagination Controls (Rule #4: 10 records per page for archive) */}
-                <PaginationBar
-                  currentPage={archivePage}
-                  totalCount={archiveTotalCount}
-                  pageSize={PAGE_SIZE}
-                  onPageChange={fetchArchiveAds}
-                  loading={archiveLoading}
                 />
               </div>
 
@@ -3981,7 +3427,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             </div>
 
             {/* Modal Body (Natural internal scroll) */}
-            <div className="overflow-y-auto p-5 sm:p-6 space-y-5 flex-1">
+            <div className="overflow-y-auto no-scrollbar p-5 sm:p-6 space-y-5 flex-1">
               
               {/* Photo Preview / Gallery */}
               {selectedAdForModal.images && selectedAdForModal.images.length > 0 ? (
