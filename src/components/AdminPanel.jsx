@@ -286,6 +286,36 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   });
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
   const [categoryStatusFilter, setCategoryStatusFilter] = useState('all'); // 'all' | 'active' | 'disabled' | 'has_ads'
+  const [catalogSubTab, setCatalogSubTab] = useState('categories'); // 'categories' | 'cities'
+  const [citiesByCountry, setCitiesByCountry] = useState(() => {
+    try {
+      const saved = localStorage.getItem('swedpersiska_portal_cities');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    const initial = {};
+    COUNTRIES.forEach(c => {
+      initial[c.id] = (c.cities || [])
+        .filter(city => city.id !== 'all')
+        .map(city => ({ id: city.id, fa: city.fa, enabled: true, isSystem: true }));
+    });
+    return initial;
+  });
+  const [cityCountryFilter, setCityCountryFilter] = useState('se');
+  const [citySearchQuery, setCitySearchQuery] = useState('');
+  const [cityModal, setCityModal] = useState({
+    isOpen: false,
+    mode: 'add',
+    countryId: 'se',
+    originalId: '',
+    id: '',
+    fa: '',
+    enabled: true,
+    errorMsg: ''
+  });
+  const [cityToDelete, setCityToDelete] = useState(null);
   const [categoryModal, setCategoryModal] = useState({
     isOpen: false,
     mode: 'add', // 'add' | 'edit'
@@ -437,6 +467,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           localStorage.setItem('swedpersiska_portal_categories', JSON.stringify(item.value));
         } catch {}
       }
+      if (item.key === 'portal_cities' && item.value && typeof item.value === 'object' && !Array.isArray(item.value)) {
+        setCitiesByCountry(item.value);
+        try {
+          localStorage.setItem('swedpersiska_portal_cities', JSON.stringify(item.value));
+        } catch {}
+      }
     });
   };
 
@@ -578,16 +614,124 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       localStorage.setItem('swedpersiska_portal_categories', JSON.stringify(updated));
     } catch {}
     try {
-      await supabase
-        .from('swedpersiska_settings')
-        .upsert({
-          key: 'portal_categories',
-          value: updated,
-          updated_at: new Date().toISOString()
-        });
+      const apiRes = await adminApi.request('save_settings', { key: 'portal_categories', value: updated });
+      if (!apiRes) {
+        await supabase
+          .from('swedpersiska_settings')
+          .upsert({
+            key: 'portal_categories',
+            value: updated,
+            updated_at: new Date().toISOString()
+          });
+      }
     } catch (err) {
       console.error('Error saving categories to Supabase:', err);
     }
+  };
+
+  // Persist Cities to Supabase & localStorage
+  const persistCities = async (updated) => {
+    setCitiesByCountry(updated);
+    try {
+      localStorage.setItem('swedpersiska_portal_cities', JSON.stringify(updated));
+    } catch {}
+    try {
+      const apiRes = await adminApi.request('save_settings', { key: 'portal_cities', value: updated });
+      if (!apiRes) {
+        await supabase
+          .from('swedpersiska_settings')
+          .upsert({
+            key: 'portal_cities',
+            value: updated,
+            updated_at: new Date().toISOString()
+          });
+      }
+    } catch (err) {
+      console.error('Error saving cities to Supabase:', err);
+    }
+  };
+
+  const handleOpenAddCity = () => {
+    playFeedback('click');
+    setCityModal({
+      isOpen: true,
+      mode: 'add',
+      countryId: cityCountryFilter,
+      originalId: '',
+      id: '',
+      fa: '',
+      enabled: true,
+      errorMsg: ''
+    });
+  };
+
+  const handleOpenEditCity = (city) => {
+    playFeedback('click');
+    setCityModal({
+      isOpen: true,
+      mode: 'edit',
+      countryId: cityCountryFilter,
+      originalId: city.id,
+      id: city.id,
+      fa: city.fa,
+      enabled: city.enabled !== false,
+      errorMsg: ''
+    });
+  };
+
+  const handleSaveCityModal = async (e) => {
+    e.preventDefault();
+    const trimmedFa = cityModal.fa.trim();
+    const trimmedId = cityModal.id.trim();
+    if (!trimmedFa) {
+      setCityModal(prev => ({ ...prev, errorMsg: 'لطفاً نام فارسی شهر را وارد نمایید.' }));
+      return;
+    }
+    if (!trimmedId) {
+      setCityModal(prev => ({ ...prev, errorMsg: 'لطفاً نام لاتین / شناسه شهر را وارد نمایید.' }));
+      return;
+    }
+
+    const countryCities = citiesByCountry[cityModal.countryId] || [];
+    if (cityModal.mode === 'add') {
+      if (countryCities.some(c => c.id.toLowerCase() === trimmedId.toLowerCase())) {
+        setCityModal(prev => ({ ...prev, errorMsg: 'این شهر قبلاً برای این کشور ثبت شده است.' }));
+        return;
+      }
+      const nextCities = [...countryCities, { id: trimmedId, fa: trimmedFa, enabled: cityModal.enabled, isSystem: false }];
+      await persistCities({ ...citiesByCountry, [cityModal.countryId]: nextCities });
+      triggerToast(`شهر «${trimmedFa}» با موفقیت اضافه شد.`);
+    } else {
+      const nextCities = countryCities.map(c =>
+        c.id === cityModal.originalId ? { ...c, id: trimmedId, fa: trimmedFa, enabled: cityModal.enabled } : c
+      );
+      await persistCities({ ...citiesByCountry, [cityModal.countryId]: nextCities });
+      triggerToast(`شهر «${trimmedFa}» بروزرسانی شد.`);
+    }
+    playFeedback('success');
+    setCityModal(prev => ({ ...prev, isOpen: false, errorMsg: '' }));
+  };
+
+  const handleToggleCityStatus = async (cityId) => {
+    playFeedback('status');
+    const countryCities = citiesByCountry[cityCountryFilter] || [];
+    const target = countryCities.find(c => c.id === cityId);
+    const nextEnabled = target ? target.enabled === false : true;
+    const nextCities = countryCities.map(c => c.id === cityId ? { ...c, enabled: nextEnabled } : c);
+    await persistCities({ ...citiesByCountry, [cityCountryFilter]: nextCities });
+    if (target) {
+      triggerToast(nextEnabled ? `شهر «${target.fa}» فعال شد.` : `شهر «${target.fa}» غیرفعال شد.`);
+    }
+  };
+
+  const handleConfirmDeleteCity = async () => {
+    if (!cityToDelete) return;
+    playFeedback('delete');
+    const countryCities = citiesByCountry[cityCountryFilter] || [];
+    const nextCities = countryCities.filter(c => c.id !== cityToDelete.id);
+    await persistCities({ ...citiesByCountry, [cityCountryFilter]: nextCities });
+    triggerToast(`شهر «${cityToDelete.fa}» حذف شد.`);
+    setCityToDelete(null);
   };
 
   // Categories Action Handlers
@@ -1292,7 +1436,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   }`}>
                     <Shapes size={17} strokeWidth={activeTab === 'categories' ? 2.3 : 1.9} />
                   </div>
-                  <span className="truncate">دسته‌بندی‌ها</span>
+                  <span className="truncate">دسته‌بندی و شهرها</span>
                 </div>
                 <span className={`flex h-6 min-w-[26px] items-center justify-center rounded-lg px-2 text-[11px] tabular-nums font-bold ${
                   activeTab === 'categories' ? 'bg-slate-900 text-white' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
@@ -1397,7 +1541,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             {[
               { id: 'overview', label: 'داشبورد', icon: LayoutGrid, badge: null, color: 'bg-slate-950' },
               { id: 'ads', label: 'آگهی‌های فعال', icon: Layers3, badge: counts.active, color: 'bg-blue-600' },
-              { id: 'categories', label: 'دسته‌بندی‌ها', icon: Shapes, badge: categoriesList.length, color: 'bg-emerald-600' },
+              { id: 'categories', label: 'دسته‌بندی و شهرها', icon: Shapes, badge: categoriesList.length, color: 'bg-emerald-600' },
               { id: 'settings', label: 'تنظیمات سایت', icon: SlidersHorizontal, badge: null, color: 'bg-purple-600' },
             ].map(item => {
               const Icon = item.icon;
@@ -2410,11 +2554,52 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           )}
 
           {/* ========================================================
-              TAB: CATEGORIES MANAGEMENT (LUXURY STONE & SLATE RTL)
+              TAB: CATEGORIES & CITIES MANAGEMENT
           ======================================================== */}
           {activeTab === 'categories' && (
             <div className="space-y-4 w-full animate-in fade-in duration-150 ease-out">
-              
+
+              {/* Sub-Navigation Pills: Categories vs Cities */}
+              <div className="p-1.5 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.03)] flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                <button
+                  type="button"
+                  onClick={() => { playFeedback('click'); setCatalogSubTab('categories'); }}
+                  className={`flex-1 sm:flex-initial min-h-[38px] px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-all cursor-pointer active:scale-[0.98] ${
+                    catalogSubTab === 'categories'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
+                  }`}
+                >
+                  <Shapes size={14} className={catalogSubTab === 'categories' ? 'text-emerald-300' : 'text-stone-400'} />
+                  <span>مدیریت دسته‌بندی‌ها</span>
+                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold ${
+                    catalogSubTab === 'categories' ? 'bg-white/15 text-white' : 'bg-stone-100 text-stone-600'
+                  }`}>
+                    {categoriesList.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { playFeedback('click'); setCatalogSubTab('cities'); }}
+                  className={`flex-1 sm:flex-initial min-h-[38px] px-4 rounded-xl text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-all cursor-pointer active:scale-[0.98] ${
+                    catalogSubTab === 'cities'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
+                  }`}
+                >
+                  <MapPin size={14} className={catalogSubTab === 'cities' ? 'text-blue-300' : 'text-stone-400'} />
+                  <span>مدیریت شهرها</span>
+                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold ${
+                    catalogSubTab === 'cities' ? 'bg-white/15 text-white' : 'bg-stone-100 text-stone-600'
+                  }`}>
+                    {Object.values(citiesByCountry).reduce((acc, arr) => acc + (Array.isArray(arr) ? arr.length : 0), 0)}
+                  </span>
+                </button>
+              </div>
+
+              {catalogSubTab === 'categories' && (
+                <>
               {/* 1. Summary Metric Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* Card 1: کل دسته‌بندی‌ها */}
@@ -2572,28 +2757,33 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                         const isEnabled = cat.enabled !== false;
 
                         return (
-                          <div key={`m-cat-${cat.id}`} className="p-3.5 space-y-3 hover:bg-blue-50/30 transition-colors">
+                          <div key={`m-cat-${cat.id}`} className={`p-4 space-y-3 transition-colors ${isEnabled ? 'hover:bg-blue-50/30' : 'bg-stone-50/60 opacity-85'}`}>
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-10 h-10 shrink-0 rounded-xl bg-stone-100 border border-stone-200/80 flex items-center justify-center text-stone-700 shadow-2xs">
-                                  <IconComp size={18} />
+                                <div className={`w-11 h-11 shrink-0 rounded-xl border flex items-center justify-center shadow-2xs transition-colors ${
+                                  isEnabled
+                                    ? 'bg-blue-50/70 border-blue-200/70 text-blue-700'
+                                    : 'bg-stone-100 border-stone-200 text-stone-400'
+                                }`}>
+                                  <IconComp size={19} />
                                 </div>
                                 <div className="min-w-0">
-                                  <span className="font-extrabold text-[13.5px] text-stone-900 block truncate">
+                                  <span className="font-extrabold text-[14px] text-stone-900 block truncate">
                                     {cat.fa}
                                   </span>
                                   <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                                     <button
                                       type="button"
+                                      dir="ltr"
                                       onClick={() => copyText(cat.id, `m-cat-${cat.id}`, 'شناسه دسته')}
-                                      className="font-mono text-[10.5px] font-bold text-stone-800 bg-stone-100 px-1.5 py-0.5 rounded border border-stone-200 inline-flex items-center gap-1"
+                                      className="font-mono text-[10.5px] font-bold text-stone-700 bg-stone-100 hover:bg-stone-200 px-2 py-0.5 rounded-md border border-stone-200/80 inline-flex items-center gap-1 cursor-pointer"
                                     >
                                       <span>#{cat.id}</span>
                                       {copiedKey === `m-cat-${cat.id}` ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} className="text-stone-400" />}
                                     </button>
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${
+                                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
                                       cat.isSystem
-                                        ? 'bg-slate-100 text-slate-700 border-slate-200'
+                                        ? 'bg-slate-100 text-slate-600 border-slate-200/80'
                                         : 'bg-purple-50 text-purple-700 border-purple-200/80'
                                     }`}>
                                       {cat.isSystem ? 'پیش‌فرض' : 'سفارشی'}
@@ -2605,29 +2795,30 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                               <button
                                 type="button"
                                 onClick={() => handleToggleCategoryStatus(cat.id)}
-                                className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold border cursor-pointer active:scale-95 transition-all ${
+                                className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold border inline-flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all ${
                                   isEnabled
                                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                     : 'bg-stone-100 text-stone-500 border-stone-200'
                                 }`}
                               >
-                                {isEnabled ? 'فعال' : 'غیرفعال'}
+                                <span className={`h-1.5 w-1.5 rounded-full ${isEnabled ? 'bg-emerald-500' : 'bg-stone-400'}`} />
+                                <span>{isEnabled ? 'فعال' : 'غیرفعال'}</span>
                               </button>
                             </div>
 
-                            <div className="flex items-center justify-between gap-2 pt-2 border-t border-stone-100">
+                            <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-stone-100">
                               {adCount > 0 ? (
                                 <button
                                   type="button"
                                   onClick={() => handleViewCategoryAds(cat.id)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/70 text-[11px] font-bold cursor-pointer active:scale-95"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200/70 text-[11px] font-bold cursor-pointer active:scale-95 whitespace-nowrap"
                                 >
                                   <span className="font-mono">{adCount}</span>
                                   <span>آگهی</span>
                                   <ExternalLink size={11} />
                                 </button>
                               ) : (
-                                <span className="px-2 py-1 rounded-lg bg-stone-100 text-stone-400 text-[11px] font-mono">
+                                <span className="px-2.5 py-1 rounded-lg bg-stone-100 text-stone-400 text-[11px] font-mono whitespace-nowrap">
                                   بدون آگهی
                                 </span>
                               )}
@@ -2636,7 +2827,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                 <button
                                   type="button"
                                   onClick={() => handleOpenEditCategory(cat)}
-                                  className="h-8 px-3 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11px] font-bold flex items-center gap-1 cursor-pointer active:scale-95"
+                                  className="h-8 px-3 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer active:scale-95 whitespace-nowrap"
                                 >
                                   <Edit3 size={13} />
                                   <span>ویرایش</span>
@@ -2657,7 +2848,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     </div>
 
                     {/* Desktop Table View (>= md) */}
-                    <div className="hidden md:block overflow-x-auto">
+                    <div className="hidden md:block overflow-x-auto no-scrollbar">
                     <table className="w-full text-right border-collapse">
                       <thead>
                         <tr className="bg-stone-50/90 border-b border-stone-200/80 text-[11.5px] font-bold text-stone-500 select-none">
@@ -2705,7 +2896,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                 <button
                                   type="button"
                                   onClick={() => copyText(cat.id, `cat-${cat.id}`, 'شناسه دسته')}
-                                  className="font-mono text-[11px] font-bold text-stone-800 bg-stone-100 hover:bg-stone-200 px-2 py-0.5 rounded border border-stone-200 flex items-center gap-1.5 cursor-pointer transition-colors"
+                                  dir="ltr"
+                                  className="font-mono text-[11px] font-bold text-stone-800 bg-stone-100 hover:bg-stone-200 px-2 py-0.5 rounded border border-stone-200 inline-flex items-center gap-1.5 cursor-pointer transition-colors"
                                   title="کپی شناسه یکتا"
                                 >
                                   <span>#{cat.id}</span>
@@ -2794,6 +2986,239 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   </>
                 )}
               </div>
+                </>
+              )}
+
+              {/* ========================================================
+                  CITY MANAGEMENT SUB-TAB
+              ======================================================== */}
+              {catalogSubTab === 'cities' && (
+                <div className="space-y-4 animate-in fade-in duration-150 ease-out">
+                  {/* Country Selector & Actions Bar */}
+                  <div className="p-4 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-3">
+                    <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+                      <span className="text-xs font-bold text-stone-500 shrink-0">کشور:</span>
+                      <div className="p-1 rounded-xl bg-stone-100/80 border border-stone-200/80 inline-flex items-center gap-1">
+                        {COUNTRIES.map(c => {
+                          const list = citiesByCountry[c.id] || [];
+                          const isSelected = cityCountryFilter === c.id;
+                          return (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => { playFeedback('select'); setCityCountryFilter(c.id); }}
+                              className={`min-h-[32px] px-3 rounded-lg text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                                isSelected ? 'bg-white text-zinc-950 shadow-xs' : 'text-stone-600 hover:text-zinc-950 hover:bg-white/50'
+                              }`}
+                            >
+                              {NORDIC_FLAGS[c.id]}
+                              <span>{c.nameFa}</span>
+                              <span className={`text-[10.5px] font-mono ${isSelected ? 'text-blue-600' : 'opacity-60'}`}>
+                                ({list.length})
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-2.5">
+                      <div className="relative flex-1">
+                        <Search size={15} className="absolute start-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                        <input
+                          type="text"
+                          placeholder="جستجوی نام فارسی یا لاتین شهر..."
+                          value={citySearchQuery}
+                          onChange={(e) => setCitySearchQuery(e.target.value)}
+                          className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 ps-9 pe-8 text-xs text-zinc-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
+                        />
+                        {citySearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setCitySearchQuery('')}
+                            className="absolute end-2.5 top-1/2 -translate-y-1/2 p-1 text-stone-400 hover:text-stone-600 rounded-md cursor-pointer"
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleOpenAddCity}
+                        className="h-10 px-4 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition-all shadow-2xs shrink-0"
+                      >
+                        <Plus size={16} />
+                        <span>افزودن شهر جدید</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Cities List (Mobile Cards + Desktop Table) */}
+                  {(() => {
+                    const currentCities = (citiesByCountry[cityCountryFilter] || []).filter(city => {
+                      const q = citySearchQuery.trim().toLowerCase();
+                      if (!q) return true;
+                      return (city.fa || '').toLowerCase().includes(q) || (city.id || '').toLowerCase().includes(q);
+                    });
+
+                    return (
+                      <div className="bg-white rounded-2xl border border-stone-200/80 shadow-[0_1px_3px_rgba(0,0,0,0.03)] overflow-hidden">
+                        {currentCities.length === 0 ? (
+                          <div className="text-center py-16 p-8 text-stone-400 space-y-2">
+                            <MapPin size={36} className="mx-auto text-stone-300" />
+                            <p className="text-sm font-semibold text-stone-600">شهری با این جستجو یافت نشد.</p>
+                            <p className="text-xs text-stone-400">جستجو را پاک کنید یا شهر جدیدی اضافه نمایید.</p>
+                          </div>
+                        ) : (
+                          <>
+                            {/* Mobile Cards */}
+                            <div className="md:hidden divide-y divide-stone-100">
+                              {currentCities.map(city => {
+                                const isEnabled = city.enabled !== false;
+                                return (
+                                  <div key={`m-city-${city.id}`} className={`p-4 space-y-3 transition-colors ${isEnabled ? 'hover:bg-blue-50/30' : 'bg-stone-50/60 opacity-85'}`}>
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="flex items-center gap-3 min-w-0">
+                                        <div className={`w-10 h-10 shrink-0 rounded-xl border flex items-center justify-center shadow-2xs ${
+                                          isEnabled ? 'bg-blue-50/70 border-blue-200/70 text-blue-700' : 'bg-stone-100 border-stone-200 text-stone-400'
+                                        }`}>
+                                          <MapPin size={18} />
+                                        </div>
+                                        <div className="min-w-0">
+                                          <span className="font-extrabold text-[14px] text-stone-900 block truncate">
+                                            {city.fa}
+                                          </span>
+                                          <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                            <span dir="ltr" className="font-mono text-[10.5px] font-bold text-stone-700 bg-stone-100 px-2 py-0.5 rounded-md border border-stone-200/80">
+                                              {city.id}
+                                            </span>
+                                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                              city.isSystem ? 'bg-slate-100 text-slate-600 border-slate-200/80' : 'bg-purple-50 text-purple-700 border-purple-200/80'
+                                            }`}>
+                                              {city.isSystem ? 'پیش‌فرض' : 'سفارشی'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleCityStatus(city.id)}
+                                        className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold border inline-flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all ${
+                                          isEnabled ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-stone-100 text-stone-500 border-stone-200'
+                                        }`}
+                                      >
+                                        <span className={`h-1.5 w-1.5 rounded-full ${isEnabled ? 'bg-emerald-500' : 'bg-stone-400'}`} />
+                                        <span>{isEnabled ? 'فعال' : 'غیرفعال'}</span>
+                                      </button>
+                                    </div>
+
+                                    <div className="flex items-center justify-end gap-1.5 pt-2.5 border-t border-stone-100">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditCity(city)}
+                                        className="h-8 px-3 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer active:scale-95"
+                                      >
+                                        <Edit3 size={13} />
+                                        <span>ویرایش</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setCityToDelete(city)}
+                                        className="h-8 w-8 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 flex items-center justify-center cursor-pointer active:scale-95"
+                                        title="حذف شهر"
+                                      >
+                                        <Trash2 size={13} />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Desktop Table */}
+                            <div className="hidden md:block overflow-x-auto no-scrollbar">
+                              <table className="w-full text-right border-collapse">
+                                <thead>
+                                  <tr className="bg-stone-50/90 border-b border-stone-200/80 text-[11.5px] font-bold text-stone-500 select-none">
+                                    <th className="py-3 px-3 text-center w-14">آیکون</th>
+                                    <th className="py-3 px-3 min-w-[180px]">نام فارسی شهر</th>
+                                    <th className="py-3 px-3 min-w-[150px]">نام لاتین</th>
+                                    <th className="py-3 px-3 text-center w-24">وضعیت</th>
+                                    <th className="py-3 px-3 text-center w-28">نوع</th>
+                                    <th className="py-3 px-3 text-center min-w-[140px]">عملیات</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-stone-100 text-xs">
+                                  {currentCities.map(city => {
+                                    const isEnabled = city.enabled !== false;
+                                    return (
+                                      <tr key={city.id} className="hover:bg-blue-50/40 transition-colors group">
+                                        <td className="py-3 px-3 text-center align-middle">
+                                          <div className="w-9 h-9 rounded-xl bg-stone-100 border border-stone-200/80 flex items-center justify-center text-stone-700 mx-auto">
+                                            <MapPin size={16} />
+                                          </div>
+                                        </td>
+                                        <td className="py-3 px-3 align-middle font-extrabold text-[13px] text-stone-900">
+                                          {city.fa}
+                                        </td>
+                                        <td className="py-3 px-3 align-middle">
+                                          <span dir="ltr" className="font-mono text-[11.5px] font-bold text-stone-700 bg-stone-100 px-2 py-0.5 rounded border border-stone-200 inline-block">
+                                            {city.id}
+                                          </span>
+                                        </td>
+                                        <td className="py-3 px-3 text-center align-middle">
+                                          <button
+                                            type="button"
+                                            onClick={() => handleToggleCityStatus(city.id)}
+                                            className={`inline-flex items-center justify-center px-2.5 py-0.5 rounded-full text-[11px] font-bold border cursor-pointer active:scale-95 transition-all ${
+                                              isEnabled ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-stone-100 text-stone-500 border-stone-200'
+                                            }`}
+                                          >
+                                            {isEnabled ? 'فعال' : 'غیرفعال'}
+                                          </button>
+                                        </td>
+                                        <td className="py-3 px-3 text-center align-middle">
+                                          <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                                            city.isSystem ? 'bg-slate-100 text-slate-700 border-slate-200' : 'bg-purple-50 text-purple-700 border-purple-200/80'
+                                          }`}>
+                                            {city.isSystem ? 'پیش‌فرض' : 'سفارشی'}
+                                          </span>
+                                        </td>
+                                        <td className="py-3 px-3 text-center align-middle">
+                                          <div className="flex items-center justify-center gap-1.5">
+                                            <button
+                                              type="button"
+                                              onClick={() => handleOpenEditCity(city)}
+                                              className="h-8 px-2.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11px] font-bold flex items-center gap-1 cursor-pointer active:scale-95"
+                                            >
+                                              <Edit3 size={13} />
+                                              <span>ویرایش</span>
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => setCityToDelete(city)}
+                                              className="h-8 w-8 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 flex items-center justify-center cursor-pointer active:scale-95"
+                                              title="حذف شهر"
+                                            >
+                                              <Trash2 size={13} />
+                                            </button>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
 
             </div>
           )}
@@ -3821,6 +4246,139 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 className="h-10 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer shadow-2xs active:scale-95 transition-all"
               >
                 حذف قطعی دسته
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          CITY ADD / EDIT MODAL
+      ======================================================== */}
+      {cityModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45 backdrop-blur-[2px] animate-in fade-in duration-150 font-vazir" dir="rtl">
+          <div className="fixed inset-0" onClick={() => setCityModal(prev => ({ ...prev, isOpen: false }))} />
+          <div className="relative z-10 w-full max-w-md bg-white rounded-3xl border border-stone-200 shadow-2xl p-6 text-right space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-stone-100 pb-3.5">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600 border border-blue-200/60">
+                  <MapPin size={19} />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-[15px] text-stone-900">
+                    {cityModal.mode === 'add' ? 'افزودن شهر جدید' : 'ویرایش مشخصات شهر'}
+                  </h3>
+                  <p className="text-[11px] text-stone-500">
+                    کشور: {COUNTRIES.find(c => c.id === cityModal.countryId)?.nameFa}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCityModal(prev => ({ ...prev, isOpen: false }))}
+                className="h-8 w-8 rounded-full bg-stone-100 hover:bg-stone-200 flex items-center justify-center text-stone-500 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {cityModal.errorMsg && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold">
+                {cityModal.errorMsg}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveCityModal} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1.5">نام فارسی شهر</label>
+                <input
+                  type="text"
+                  placeholder="مثال: اوسترشوند"
+                  value={cityModal.fa}
+                  onChange={(e) => setCityModal(prev => ({ ...prev, fa: e.target.value, errorMsg: '' }))}
+                  className="w-full h-10 rounded-xl bg-stone-50 focus:bg-white border border-stone-200 px-3 text-xs text-zinc-900 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1.5">نام لاتین شهر (برای ذخیره و جستجو)</label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  placeholder="مثال: Östersund"
+                  value={cityModal.id}
+                  onChange={(e) => setCityModal(prev => ({ ...prev, id: e.target.value, errorMsg: '' }))}
+                  className="w-full h-10 rounded-xl bg-stone-50 focus:bg-white border border-stone-200 px-3 text-xs font-mono text-zinc-900 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <label className="flex items-center gap-2.5 cursor-pointer select-none p-2.5 rounded-xl bg-stone-50 border border-stone-200/80">
+                <input
+                  type="checkbox"
+                  checked={cityModal.enabled}
+                  onChange={(e) => setCityModal(prev => ({ ...prev, enabled: e.target.checked }))}
+                  className="rounded border-stone-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-xs font-bold text-stone-700">شهر در فرم ثبت آگهی و فیلترها فعال باشد</span>
+              </label>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCityModal(prev => ({ ...prev, isOpen: false }))}
+                  className="h-10 px-4 rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-100 font-bold text-xs cursor-pointer"
+                >
+                  انصراف
+                </button>
+                <button
+                  type="submit"
+                  className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs cursor-pointer active:scale-95 transition-all"
+                >
+                  {cityModal.mode === 'add' ? 'افزودن شهر' : 'ذخیره تغییرات'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          DELETE CITY CONFIRMATION MODAL
+      ======================================================== */}
+      {cityToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45 backdrop-blur-[2px] animate-in fade-in duration-150 font-vazir" dir="rtl">
+          <div className="fixed inset-0" onClick={() => setCityToDelete(null)} />
+          <div className="relative z-10 w-full max-w-md bg-white rounded-3xl border border-stone-200 shadow-2xl p-6 text-right space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 border border-rose-200/80">
+                <Trash2 size={22} />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-[16px] text-stone-900 tracking-tight">
+                  حذف شهر «{cityToDelete.fa}»
+                </h3>
+                <p dir="ltr" className="text-xs text-stone-400 font-mono mt-0.5 text-right">
+                  {cityToDelete.id}
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-stone-600">
+              آیا از حذف این شهر مطمئن هستید؟ این عملیات قابل بازگشت نیست.
+            </p>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setCityToDelete(null)}
+                className="h-10 px-4 rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-100 font-bold text-xs cursor-pointer"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteCity}
+                className="h-10 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer active:scale-95"
+              >
+                حذف قطعی شهر
               </button>
             </div>
           </div>
