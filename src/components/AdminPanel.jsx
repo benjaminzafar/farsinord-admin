@@ -1973,20 +1973,20 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 
                 {/* RIGHT COLUMN (2/3 width): آخرین آگهی‌های پرتال */}
                 <div className="xl:col-span-2 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.03)] p-4 sm:p-6 flex flex-col space-y-4">
-                  <div className="flex items-center justify-between border-b border-stone-100 pb-4">
-                    <div className="flex items-center gap-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-100 pb-4">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 border border-blue-200/60 shadow-sm">
                         <Layers3 size={20} strokeWidth={2} />
                       </div>
-                      <div>
-                        <h2 className="text-[16px] font-bold text-stone-900 tracking-tight">آخرین آگهی‌های ثبت‌شده در پرتال</h2>
+                      <div className="min-w-0">
+                        <h2 className="text-[15px] sm:text-[16px] font-bold text-stone-900 tracking-tight">آخرین آگهی‌های ثبت‌شده در پرتال</h2>
                         <p className="text-[12px] text-stone-500">مشاهده سریع و بررسی آگهی‌های نیازمندی‌های کاربران</p>
                       </div>
                     </div>
                     <button
                       type="button"
                       onClick={() => handleTabChange('ads')}
-                      className="inline-flex items-center gap-1.5 text-[12px] font-bold text-blue-700 hover:text-blue-900 cursor-pointer group"
+                      className="inline-flex items-center gap-1.5 text-[12px] font-bold text-blue-700 hover:text-blue-900 cursor-pointer group shrink-0 whitespace-nowrap self-end sm:self-auto"
                     >
                       <span>مدیریت همه آگهی‌ها (<span className="tabular-nums font-bold">{counts.active}</span>)</span>
                       <ArrowUpRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
@@ -2001,12 +2001,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       return (
                         <div
                           key={ad.id}
-                          className="w-full p-3.5 flex items-center justify-between gap-3 text-right hover:bg-stone-50/70 transition-colors group"
+                          className="w-full p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-right hover:bg-stone-50/70 transition-colors group"
                         >
-                          <div className="flex items-center gap-3 min-w-0">
+                          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
                             <div 
                               onClick={() => setSelectedAdForModal(ad)}
-                              className="w-12 h-12 rounded-xl bg-stone-100 border border-stone-200/80 overflow-hidden shrink-0 cursor-pointer shadow-sm group-hover:scale-105 transition-transform"
+                              className="w-12 h-12 sm:w-12 sm:h-12 rounded-xl bg-stone-100 border border-stone-200/80 overflow-hidden shrink-0 cursor-pointer shadow-sm group-hover:scale-105 transition-transform"
                             >
                               {ad.images && ad.images[0] ? (
                                 <img src={ad.images[0]} alt="" className="w-full h-full object-cover" />
@@ -2016,49 +2016,49 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                 </div>
                               )}
                             </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span dir="ltr" className="inline-flex items-center font-mono font-bold text-[11.5px] text-stone-700 bg-stone-100 px-2 py-0.5 rounded-md border border-stone-200/70 shadow-sm">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                                <span dir="ltr" className="inline-flex items-center font-mono font-bold text-[11px] sm:text-[11.5px] text-stone-700 bg-stone-100 px-2 py-0.5 rounded-md border border-stone-200/70 shadow-sm whitespace-nowrap shrink-0">
                                   <span>#</span>
                                   <span>{ad.reference_number || ad.id.slice(0, 8)}</span>
                                 </span>
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-blue-50 text-blue-700 border border-blue-200/80">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-blue-50 text-blue-700 border border-blue-200/80 whitespace-nowrap shrink-0">
                                   {NORDIC_FLAGS[ad.country || 'se']}
                                   <span>{countryObj.nameFa}</span>
                                 </span>
                                 {ad.is_featured && (
-                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200/70 flex items-center gap-1">
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200/70 inline-flex items-center gap-1 whitespace-nowrap shrink-0">
                                     <Sparkles size={11} className="text-amber-600" />
                                     <span>ویژه</span>
                                   </span>
                                 )}
                                 {catObj && (
-                                  <span className="text-[11px] text-stone-500 font-medium">
+                                  <span className="text-[11px] text-stone-500 font-medium whitespace-nowrap">
                                     · {catObj.fa}
                                   </span>
                                 )}
                               </div>
                               <p 
                                 onClick={() => setSelectedAdForModal(ad)}
-                                className="text-[13px] font-bold text-stone-900 hover:text-blue-600 truncate mt-1 cursor-pointer"
+                                className="text-[13.5px] sm:text-[13px] font-bold text-stone-900 hover:text-blue-600 truncate mt-1.5 sm:mt-1 cursor-pointer"
                               >
                                 {ad.title}
                               </p>
-                              <div className="flex items-center gap-2 text-[11.5px] text-stone-500 mt-1">
+                              <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[11.5px] text-stone-500 mt-1">
                                 <span className="font-medium text-stone-600">{ad.city || 'اسکاندیناوی'}</span>
                                 <span>·</span>
-                                <span className="font-bold text-stone-900 tabular-nums">
+                                <span className="font-bold text-stone-900 tabular-nums whitespace-nowrap">
                                   {ad.price ? `${Number(ad.price).toLocaleString('sv-SE')} کرون` : 'توافقی'}
                                 </span>
                               </div>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="w-full sm:w-auto pt-2.5 sm:pt-0 border-t border-stone-100 sm:border-t-0 flex items-center justify-end gap-2 shrink-0">
                             <button
                               type="button"
                               onClick={() => setSelectedAdForModal(ad)}
-                              className="h-9 px-3 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11.5px] font-bold flex items-center gap-1.5 cursor-pointer transition-colors active:scale-95"
+                              className="flex-1 sm:flex-initial h-9 px-3 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11.5px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors active:scale-95 whitespace-nowrap"
                               title="مشاهده جزئیات آگهی"
                             >
                               <Eye size={14} className="text-stone-500" />
@@ -2068,7 +2068,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                             <button
                               type="button"
                               onClick={() => toggleFeatured(ad)}
-                              className={`h-9 w-9 rounded-lg border flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
+                              className={`h-9 w-9 shrink-0 rounded-lg border flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
                                 ad.is_featured
                                   ? 'bg-amber-50 text-amber-800 border-amber-300 shadow-sm'
                                   : 'bg-white hover:bg-stone-50 text-stone-400 border-stone-200'
@@ -2081,7 +2081,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                             <button
                               type="button"
                               onClick={() => archiveAd(ad)}
-                              className="h-9 px-3 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 text-stone-600 flex items-center gap-1.5 text-[11px] font-bold cursor-pointer transition-all active:scale-95"
+                              className="flex-1 sm:flex-initial h-9 px-3 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 text-stone-600 flex items-center justify-center gap-1.5 text-[11px] font-bold cursor-pointer transition-all active:scale-95 whitespace-nowrap"
                               title="انتقال به بایگانی و تاریخچه"
                             >
                               <Archive size={13} className="text-stone-500" />
