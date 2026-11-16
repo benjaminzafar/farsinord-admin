@@ -216,8 +216,9 @@ const DEFAULT_CATEGORIES = [
   { id: 'jobb', fa: 'استخدام', icon: 'GraduationCap', enabled: true, isSystem: true, order: 4 },
   { id: 'kop-salj', fa: 'خرید و فروش', icon: 'ShoppingBag', enabled: true, isSystem: true, order: 5 },
   { id: 'fordon', fa: 'خودرو', icon: 'Car', enabled: true, isSystem: true, order: 6 },
-  { id: 'evenemang', fa: 'رویدادها', icon: 'Calendar', enabled: true, isSystem: true, order: 7 },
-  { id: 'ovrigt', fa: 'سایر', icon: 'Tag', enabled: true, isSystem: true, order: 8 },
+  { id: 'elektronik', fa: 'وسایل الکترونیکی', icon: 'Laptop', enabled: true, isSystem: true, order: 7 },
+  { id: 'evenemang', fa: 'رویدادها', icon: 'Calendar', enabled: true, isSystem: true, order: 8 },
+  { id: 'ovrigt', fa: 'سایر', icon: 'Tag', enabled: true, isSystem: true, order: 9 },
 ];
 
 export default function AdminPanel({ onClose, onRefreshAds }) {
