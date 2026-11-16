@@ -432,6 +432,17 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     measurementId: ''
   });
 
+  // Cloudflare R2 Storage State
+  const [r2Settings, setR2Settings] = useState({
+    enabled: false,
+    accountId: '',
+    accessKeyId: '',
+    secretAccessKey: '',
+    bucketName: '',
+    publicUrl: '',
+    hasCredentials: false
+  });
+
   const [adminTurnstileToken, setAdminTurnstileToken] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
@@ -470,6 +481,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       }
       if (item.key === 'analytics_settings' && item.value) {
         setAnalyticsSettings(prev => ({ ...prev, ...item.value }));
+      }
+      if (item.key === 'r2_settings' && item.value) {
+        setR2Settings(prev => ({ ...prev, ...item.value }));
       }
       if (item.key === 'portal_categories' && item.value && Array.isArray(item.value) && item.value.length > 0) {
         setCategoriesList(item.value);
@@ -1071,6 +1085,48 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       setTimeout(() => setSaveSuccessMsg(''), 3000);
     } catch (err) {
       alert('خطا در ذخیره تنظیمات آنالیتیکس: ' + err.message);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const saveR2Settings = async (e) => {
+    e.preventDefault();
+    if (r2Settings.enabled && (!r2Settings.accountId.trim() || !r2Settings.bucketName.trim() || !r2Settings.publicUrl.trim())) {
+      alert('لطفاً شناسه حساب، نام سطل ذخیره‌سازی و آدرس عمومی دامنه تصاویر را وارد کنید.');
+      return;
+    }
+    setSavingSettings(true);
+    try {
+      const payload = {
+        enabled: Boolean(r2Settings.enabled),
+        accountId: r2Settings.accountId.trim(),
+        bucketName: r2Settings.bucketName.trim(),
+        publicUrl: r2Settings.publicUrl.trim().replace(/\/+$/, ''),
+        accessKeyId: r2Settings.accessKeyId.trim(),
+        secretAccessKey: r2Settings.secretAccessKey.trim()
+      };
+      const apiRes = await adminApi.request('save_settings', { key: 'r2_settings', value: payload });
+      if (!apiRes) {
+        const { error } = await supabase
+          .from('swedpersiska_settings')
+          .upsert({
+            key: 'r2_settings',
+            value: payload,
+            updated_at: new Date().toISOString()
+          });
+        if (error) throw error;
+      }
+      setR2Settings(prev => ({
+        ...prev,
+        hasCredentials: prev.hasCredentials || Boolean(payload.accessKeyId && payload.secretAccessKey),
+        accessKeyId: '',
+        secretAccessKey: ''
+      }));
+      setSaveSuccessMsg('تنظیمات فضای ابری کلودفلر R2 با موفقیت ذخیره شد.');
+      setTimeout(() => setSaveSuccessMsg(''), 3000);
+    } catch (err) {
+      alert('خطا در ذخیره تنظیمات فضای ابری: ' + err.message);
     } finally {
       setSavingSettings(false);
     }
@@ -3826,6 +3882,113 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     >
                       <Save size={15} />
                       <span>ذخیره تنظیمات آنالیتیکس</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Cloudflare R2 Object Storage Card */}
+              <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-zinc-900">فضای ابری تصاویر (کلودفلر R2)</h3>
+                    <p className="text-[11px] text-stone-500 mt-0.5">حداکثر ۴ تصویر برای هر آگهی • حداکثر ۱ مگابایت برای هر تصویر</p>
+                  </div>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                    r2Settings.enabled
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-stone-100 text-stone-500 border-stone-200'
+                  }`}>
+                    {r2Settings.enabled ? 'فعال' : 'غیرفعال'}
+                  </span>
+                </div>
+
+                <form onSubmit={saveR2Settings} className="space-y-4">
+                  <label className="flex items-center justify-between p-4 rounded-xl bg-stone-50 hover:bg-stone-100/70 border border-stone-200/80 cursor-pointer transition-all shadow-2xs">
+                    <div>
+                      <span className="text-xs font-bold text-zinc-900 block">فعال‌سازی آپلود مستقیم تصاویر در کلودفلر R2</span>
+                      <span className="text-[11px] text-stone-500">فشرده‌سازی خودکار تصاویر و ذخیره پرسرعت در فضای ابری</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={r2Settings.enabled}
+                      onChange={(e) => setR2Settings(prev => ({ ...prev, enabled: e.target.checked }))}
+                      className="h-4 w-4 rounded text-zinc-900 focus:ring-zinc-900 cursor-pointer"
+                    />
+                  </label>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">شناسه حساب کلودفلر</label>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        placeholder="Account ID"
+                        value={r2Settings.accountId || ''}
+                        onChange={(e) => setR2Settings(prev => ({ ...prev, accountId: e.target.value }))}
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">نام سطل ذخیره‌سازی</label>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        placeholder="farsinord-images"
+                        value={r2Settings.bucketName || ''}
+                        onChange={(e) => setR2Settings(prev => ({ ...prev, bucketName: e.target.value }))}
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">آدرس عمومی دامنه تصاویر</label>
+                    <input
+                      type="url"
+                      dir="ltr"
+                      placeholder="https://images.yourdomain.com"
+                      value={r2Settings.publicUrl || ''}
+                      onChange={(e) => setR2Settings(prev => ({ ...prev, publicUrl: e.target.value }))}
+                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید دسترسی</label>
+                      <input
+                        type="password"
+                        dir="ltr"
+                        placeholder={r2Settings.hasCredentials ? 'ثبت شده (برای تغییر وارد کنید)' : 'Access Key ID'}
+                        value={r2Settings.accessKeyId || ''}
+                        onChange={(e) => setR2Settings(prev => ({ ...prev, accessKeyId: e.target.value }))}
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید محرمانه</label>
+                      <input
+                        type="password"
+                        dir="ltr"
+                        placeholder={r2Settings.hasCredentials ? 'ثبت شده (برای تغییر وارد کنید)' : 'Secret Access Key'}
+                        value={r2Settings.secretAccessKey || ''}
+                        onChange={(e) => setR2Settings(prev => ({ ...prev, secretAccessKey: e.target.value }))}
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-1">
+                    <button
+                      type="submit"
+                      disabled={savingSettings}
+                      className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 shadow-2xs active:scale-[0.98] transition-all cursor-pointer"
+                    >
+                      <Save size={15} />
+                      <span>ذخیره تنظیمات فضای ابری</span>
                     </button>
                   </div>
                 </form>

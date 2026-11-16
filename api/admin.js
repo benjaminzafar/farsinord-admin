@@ -139,7 +139,23 @@ export default async function handler(req, res) {
         countryStats,
         categoryCounts,
         recentActiveAds: recentRes.data || [],
-        settings: settingsRes.data || []
+        settings: (settingsRes.data || []).map((item) => {
+          if (item.key === 'r2_settings' && item.value && typeof item.value === 'object') {
+            return {
+              ...item,
+              value: {
+                enabled: Boolean(item.value.enabled),
+                accountId: item.value.accountId || '',
+                bucketName: item.value.bucketName || '',
+                publicUrl: item.value.publicUrl || '',
+                hasCredentials: Boolean(item.value.accessKeyId && item.value.secretAccessKey),
+                accessKeyId: '',
+                secretAccessKey: ''
+              }
+            };
+          }
+          return item;
+        })
       });
     }
 
@@ -228,13 +244,30 @@ export default async function handler(req, res) {
 
     if (action === 'save_settings') {
       const { key, value } = body;
-      const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'stripe_settings', 'turnstile_settings', 'analytics_settings'];
+      const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'stripe_settings', 'turnstile_settings', 'analytics_settings', 'r2_settings'];
       if (!allowedKeys.includes(key)) {
         return res.status(400).json({ ok: false, error: 'Invalid settings key' });
       }
+      let nextValue = value;
+      if (key === 'r2_settings' && value && typeof value === 'object') {
+        const { data: existingRow } = await supabase
+          .from('swedpersiska_settings')
+          .select('value')
+          .eq('key', 'r2_settings')
+          .maybeSingle();
+        const prev = (existingRow && existingRow.value) || {};
+        nextValue = {
+          enabled: Boolean(value.enabled),
+          accountId: String(value.accountId || '').trim(),
+          bucketName: String(value.bucketName || '').trim(),
+          publicUrl: String(value.publicUrl || '').trim().replace(/\/+$/, ''),
+          accessKeyId: String(value.accessKeyId || '').trim() || prev.accessKeyId || '',
+          secretAccessKey: String(value.secretAccessKey || '').trim() || prev.secretAccessKey || ''
+        };
+      }
       const { error } = await supabase.from('swedpersiska_settings').upsert({
         key,
-        value,
+        value: nextValue,
         updated_at: new Date().toISOString()
       });
       if (error) throw error;
