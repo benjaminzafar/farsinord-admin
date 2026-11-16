@@ -426,6 +426,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     };
   });
 
+  // Google Analytics (GA4) State
+  const [analyticsSettings, setAnalyticsSettings] = useState({
+    enabled: false,
+    measurementId: ''
+  });
+
   const [adminTurnstileToken, setAdminTurnstileToken] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
@@ -461,6 +467,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       }
       if (item.key === 'turnstile_settings' && item.value) {
         setTurnstileSettings(prev => ({ ...prev, ...item.value }));
+      }
+      if (item.key === 'analytics_settings' && item.value) {
+        setAnalyticsSettings(prev => ({ ...prev, ...item.value }));
       }
       if (item.key === 'portal_categories' && item.value && Array.isArray(item.value) && item.value.length > 0) {
         setCategoriesList(item.value);
@@ -1031,6 +1040,37 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       setTimeout(() => setSaveSuccessMsg(''), 3000);
     } catch (err) {
       alert('خطا در ذخیره سئو: ' + err.message);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const saveAnalyticsSettings = async (e) => {
+    e.preventDefault();
+    const cleanId = (analyticsSettings.measurementId || '').trim().toUpperCase();
+    if (analyticsSettings.enabled && !/^G-[A-Z0-9]{4,}$/.test(cleanId)) {
+      alert('لطفاً شناسه معتبر گوگل آنالیتیکس وارد کنید (مثال: G-XXXXXXXXXX).');
+      return;
+    }
+    const payload = { enabled: Boolean(analyticsSettings.enabled), measurementId: cleanId };
+    setAnalyticsSettings(payload);
+    setSavingSettings(true);
+    try {
+      const apiRes = await adminApi.request('save_settings', { key: 'analytics_settings', value: payload });
+      if (!apiRes) {
+        const { error } = await supabase
+          .from('swedpersiska_settings')
+          .upsert({
+            key: 'analytics_settings',
+            value: payload,
+            updated_at: new Date().toISOString()
+          });
+        if (error) throw error;
+      }
+      setSaveSuccessMsg('تنظیمات گوگل آنالیتیکس با موفقیت ذخیره شد.');
+      setTimeout(() => setSaveSuccessMsg(''), 3000);
+    } catch (err) {
+      alert('خطا در ذخیره تنظیمات آنالیتیکس: ' + err.message);
     } finally {
       setSavingSettings(false);
     }
@@ -3731,6 +3771,61 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     >
                       <Save size={15} />
                       <span>ذخیره سئو</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Google Analytics (GA4) Card */}
+              <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-zinc-900">گوگل آنالیتیکس (آمار بازدیدکنندگان)</h3>
+                    <p className="text-[11px] text-stone-500 mt-0.5">ردیابی لحظه‌ای بازدید صفحات، کشورها و آگهی‌ها در سایت اصلی</p>
+                  </div>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                    analyticsSettings.enabled
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-stone-100 text-stone-500 border-stone-200'
+                  }`}>
+                    {analyticsSettings.enabled ? 'فعال' : 'غیرفعال'}
+                  </span>
+                </div>
+
+                <form onSubmit={saveAnalyticsSettings} className="space-y-4">
+                  <label className="flex items-center justify-between p-4 rounded-xl bg-stone-50 hover:bg-stone-100/70 border border-stone-200/80 cursor-pointer transition-all shadow-2xs">
+                    <div>
+                      <span className="text-xs font-bold text-zinc-900 block">فعال‌سازی گوگل آنالیتیکس در سایت</span>
+                      <span className="text-[11px] text-stone-500">ارسال خودکار آمار بازدید صفحات و آگهی‌ها</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={analyticsSettings.enabled}
+                      onChange={(e) => setAnalyticsSettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                      className="h-4 w-4 rounded text-zinc-900 focus:ring-zinc-900 cursor-pointer"
+                    />
+                  </label>
+
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">شناسه اندازه‌گیری گوگل آنالیتیکس</label>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      placeholder="G-XXXXXXXXXX"
+                      value={analyticsSettings.measurementId || ''}
+                      onChange={(e) => setAnalyticsSettings(prev => ({ ...prev, measurementId: e.target.value }))}
+                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
+                    />
+                  </div>
+
+                  <div className="pt-1">
+                    <button
+                      type="submit"
+                      disabled={savingSettings}
+                      className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 shadow-2xs active:scale-[0.98] transition-all cursor-pointer"
+                    >
+                      <Save size={15} />
+                      <span>ذخیره تنظیمات آنالیتیکس</span>
                     </button>
                   </div>
                 </form>
