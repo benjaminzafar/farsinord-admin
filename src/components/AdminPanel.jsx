@@ -1684,36 +1684,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               </span>
               <span className="text-[11px] text-stone-500 font-medium mt-0.5">سوئد پرشیا • سامانه نیازمندی‌ها</span>
             </div>
-
-            {/* Quick Navigation Pills inside Top Navbar */}
-            <div className="hidden xl:flex items-center gap-1 bg-stone-100/90 p-1 rounded-xl border border-stone-200/80 ms-3">
-              {[
-                { id: 'overview', label: 'نمای کلی', icon: LayoutGrid },
-                { id: 'ads', label: 'آگهی‌ها', icon: Layers3 },
-                { id: 'archive', label: 'بایگانی', icon: Archive },
-                { id: 'categories', label: 'دسته‌ها', icon: Shapes },
-                { id: 'monetization', label: 'پرداخت', icon: WalletCards },
-                { id: 'settings', label: 'تنظیمات', icon: SlidersHorizontal },
-              ].map(tab => {
-                const TabIcon = tab.icon;
-                const isCurr = activeTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => handleTabChange(tab.id)}
-                    className={`h-8 px-2.5 rounded-lg text-[11.5px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer ${
-                      isCurr
-                        ? 'bg-white text-stone-950 shadow-sm border border-stone-200/80'
-                        : 'text-stone-600 hover:text-stone-900 hover:bg-white/60'
-                    }`}
-                  >
-                    <TabIcon size={13} className={isCurr ? 'text-blue-600' : 'text-stone-400'} />
-                    <span>{tab.label}</span>
-                  </button>
-                );
-              })}
-            </div>
           </div>
 
           {/* Left: Search Bar + Notification Bell + Live Site Button */}
@@ -1763,16 +1733,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               )}
             </button>
 
-            {/* Live Site Link Button */}
-            <button
-              type="button"
-              onClick={onClose}
-              className="h-10 px-4 rounded-xl bg-stone-900 hover:bg-black text-white text-xs font-bold flex items-center gap-2 shadow-sm cursor-pointer active:scale-95 transition-colors group shrink-0"
-            >
-              <Globe2 size={15} className="text-blue-400" />
-              <span>مشاهده سایت</span>
-              <ArrowUpRight size={13} className="text-stone-400 group-hover:text-white transition-colors" />
-            </button>
           </div>
         </header>
 
