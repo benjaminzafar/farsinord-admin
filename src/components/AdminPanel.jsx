@@ -2943,7 +2943,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                     {cat.fa}
                                   </span>
                                   <span className="text-[10.5px] text-stone-400">
-                                    آیکون: {CATEGORY_ICON_LIST.find(i => i.name === cat.icon)?.label || 'عمومی و سایر'}
+                                    آیکون: {AVAILABLE_CATEGORY_ICONS.find(i => i.name === cat.icon)?.label || 'عمومی و سایر'}
                                   </span>
                                 </div>
                               </td>
