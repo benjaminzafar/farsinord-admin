@@ -936,10 +936,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         ...prev,
         vip: nextVal ? prev.vip + 1 : Math.max(0, prev.vip - 1)
       }));
-      triggerToast(nextVal ? 'آگهی به VIP تبدیل شد.' : 'نشان VIP حذف شد.');
+      triggerToast(nextVal ? 'آگهی به وضعیت ویژه ارتقا یافت.' : 'نشان ویژه حذف شد.');
       if (onRefreshAds) onRefreshAds();
     } catch (err) {
-      alert('خطا در تغییر وضعیت VIP: ' + err.message);
+      alert('خطا در تغییر وضعیت ویژه: ' + err.message);
     }
   };
 
@@ -1174,6 +1174,14 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           document.activeElement.blur();
           return;
         }
+        if (cityModal.isOpen) {
+          setCityModal(prev => ({ ...prev, isOpen: false }));
+          return;
+        }
+        if (cityToDelete) {
+          setCityToDelete(null);
+          return;
+        }
         if (categoryModal.isOpen) {
           setCategoryModal({ isOpen: false, mode: 'add', id: '', fa: '', icon: 'Tag', enabled: true, isSystem: false, errorMsg: '' });
           return;
@@ -1233,7 +1241,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           {/* Header */}
           <div className="text-center space-y-2">
             <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-zinc-950 font-black text-xs shadow-xs">
-              SP
+              س‌پ
             </div>
             <div>
               <h2 className="text-base font-extrabold text-white tracking-tight">ورود به مدیریت</h2>
@@ -1343,7 +1351,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           <div className="flex h-16 items-center justify-between px-2 pb-3 border-b border-stone-800/90 shrink-0">
             <div className="flex items-center gap-3 group cursor-pointer min-w-0" onClick={onClose} title="مشاهده وب‌سایت">
               <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-white via-stone-100 to-stone-300 text-slate-950 shadow-md font-black text-sm transition-transform duration-200 group-hover:scale-105 active:scale-95 border border-white/30">
-                <span>SP</span>
+                <span>س‌پ</span>
                 <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-500 ring-2 ring-[#11141a]" />
               </div>
               <div className="flex flex-col min-w-0">
@@ -1352,7 +1360,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               </div>
             </div>
             <span className="text-[10px] font-extrabold px-2 py-1 rounded-lg bg-white/10 text-stone-200 border border-white/10 shrink-0">
-              ADMIN
+              مدیریت
             </span>
           </div>
 
@@ -1519,7 +1527,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           <div className="flex h-16 items-center justify-between px-4 border-b border-stone-800/80 shrink-0">
             <div className="flex items-center gap-3">
               <div className="relative h-10 w-10 rounded-xl bg-white text-zinc-950 font-black text-xs flex items-center justify-center shadow-sm">
-                SP
+                س‌پ
                 <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-[#11141a]" />
               </div>
               <div className="flex flex-col">
@@ -2088,9 +2096,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     <div className="pt-2 border-t border-stone-100 flex items-center justify-between text-[11.5px] text-stone-400">
                       <span>شبکه‌های معتبر:</span>
                       <div className="flex items-center gap-1.5 font-bold text-stone-600 text-[10px]">
-                        <span className="px-2 py-0.5 rounded bg-stone-100 border border-stone-200 font-mono">VISA</span>
-                        <span className="px-2 py-0.5 rounded bg-stone-100 border border-stone-200 font-mono">Mastercard</span>
-                        <span className="px-2 py-0.5 rounded bg-stone-100 border border-stone-200 font-mono">Stripe</span>
+                        <span className="px-2 py-0.5 rounded bg-stone-100 border border-stone-200">ویزا کارت</span>
+                        <span className="px-2 py-0.5 rounded bg-stone-100 border border-stone-200">مسترکارت</span>
+                        <span className="px-2 py-0.5 rounded bg-stone-100 border border-stone-200">استرایپ</span>
                       </div>
                     </div>
                   </div>
@@ -2886,7 +2894,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                     {cat.fa}
                                   </span>
                                   <span className="text-[10.5px] text-stone-400">
-                                    آیکون: {cat.icon || 'Tag'}
+                                    آیکون: {CATEGORY_ICON_LIST.find(i => i.name === cat.icon)?.label || 'عمومی و سایر'}
                                   </span>
                                 </div>
                               </td>
@@ -3345,24 +3353,24 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                   <div className="space-y-3 pt-1">
                     <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید عمومی درگاه (Publishable Key)</label>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید عمومی درگاه پرداخت</label>
                       <input
                         type="text"
                         value={stripeSettings.publishableKey}
                         onChange={(e) => setStripeSettings(prev => ({ ...prev, publishableKey: e.target.value }))}
-                        placeholder="pk_test_... یا pk_live_..."
+                        placeholder="کلید عمومی آزمایشی یا عملیاتی"
                         className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
                         dir="ltr"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید محرمانه درگاه (Secret Key)</label>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید محرمانه درگاه پرداخت</label>
                       <input
                         type="password"
                         value={stripeSettings.secretKey}
                         onChange={(e) => setStripeSettings(prev => ({ ...prev, secretKey: e.target.value }))}
-                        placeholder="sk_test_... یا sk_live_..."
+                        placeholder="کلید محرمانه آزمایشی یا عملیاتی"
                         className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
                         dir="ltr"
                       />
@@ -3393,10 +3401,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                         onChange={(e) => setStripeSettings(prev => ({ ...prev, currency: e.target.value }))}
                         className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-medium focus:border-stone-400 focus:outline-none transition-all cursor-pointer shadow-2xs"
                       >
-                        <option value="SEK">کرون سوئد (SEK)</option>
-                        <option value="NOK">کرون نروژ (NOK)</option>
-                        <option value="DKK">کرون دانمارک (DKK)</option>
-                        <option value="EUR">یورو فنلاند (EUR)</option>
+                        <option value="SEK">کرون سوئد</option>
+                        <option value="NOK">کرون نروژ</option>
+                        <option value="DKK">کرون دانمارک</option>
+                        <option value="EUR">یورو فنلاند</option>
                       </select>
                     </div>
 
@@ -3540,24 +3548,24 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید عمومی سایت (Site Key)</label>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید عمومی سایت</label>
                       <input
                         type="text"
                         value={turnstileSettings.siteKey}
                         onChange={(e) => setTurnstileSettings(prev => ({ ...prev, siteKey: e.target.value }))}
-                        placeholder={turnstileSettings.mode === 'test' ? 'حالت تستی نیازی به کلید ندارد' : '0x4AAAAAA...'}
+                        placeholder={turnstileSettings.mode === 'test' ? 'حالت آزمایشی نیازی به کلید ندارد' : 'کلید عمومی را وارد کنید'}
                         className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
                         dir="ltr"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید محرمانه سیستم (Secret Key)</label>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید محرمانه سیستم</label>
                       <input
                         type="password"
                         value={turnstileSettings.secretKey}
                         onChange={(e) => setTurnstileSettings(prev => ({ ...prev, secretKey: e.target.value }))}
-                        placeholder={turnstileSettings.mode === 'test' ? 'حالت تستی نیازی به کلید ندارد' : '0x4AAAAAA...'}
+                        placeholder={turnstileSettings.mode === 'test' ? 'حالت آزمایشی نیازی به کلید ندارد' : 'کلید محرمانه را وارد کنید'}
                         className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
                         dir="ltr"
                       />
@@ -3567,7 +3575,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                 {/* Live Preview Widget */}
                 <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-3">
-                  <h3 className="text-xs font-extrabold text-zinc-900">تست ویجت</h3>
+                  <h3 className="text-xs font-extrabold text-zinc-900">آزمایش سپر ضدبات</h3>
                   <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/80 flex flex-col items-center justify-center space-y-2 shadow-2xs">
                     <CloudflareTurnstile
                       theme="light"
@@ -4305,7 +4313,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 <input
                   type="text"
                   dir="ltr"
-                  placeholder="مثال: Östersund"
+                  placeholder="مثال: استکهلم (به حروف لاتین)"
                   value={cityModal.id}
                   onChange={(e) => setCityModal(prev => ({ ...prev, id: e.target.value, errorMsg: '' }))}
                   className="w-full h-10 rounded-xl bg-stone-50 focus:bg-white border border-stone-200 px-3 text-xs font-mono text-zinc-900 focus:border-blue-500 focus:outline-none"
