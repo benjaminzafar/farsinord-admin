@@ -370,7 +370,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
 
   // Site Branding State
-  const [siteName, setSiteName] = useState('سوئد پرشیا');
+  const [siteName, setSiteName] = useState('Farsi Nord');
   const [siteSlogan, setSiteSlogan] = useState('نیازمندی‌های فارسی‌زبانان در سراسر اسکاندیناوی');
   const [logoUrl, setLogoUrl] = useState('');
   const [faviconUrl, setFaviconUrl] = useState('');
@@ -470,7 +470,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     if (!items || !Array.isArray(items)) return;
     items.forEach(item => {
       if (item.key === 'site_branding' && item.value) {
-        setSiteName(item.value.siteName || 'سوئد پرشیا');
+        setSiteName(item.value.siteName || 'Farsi Nord');
         setSiteSlogan(item.value.siteSlogan || '');
         setLogoUrl(item.value.logoUrl || '');
         setFaviconUrl(item.value.faviconUrl || '');
@@ -1469,7 +1469,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             </div>
             <div>
               <h2 className="text-lg font-black text-[#1D1D1F] tracking-tight">ورود به پنل مدیریت</h2>
-              <p className="text-xs text-[#6E6E73] font-medium mt-0.5">سوئد پرشیا — سامانه مدیریت نیازمندی‌ها</p>
+              <p className="text-xs text-[#6E6E73] font-medium mt-0.5">Farsi Nord — سامانه مدیریت نیازمندی‌ها</p>
             </div>
           </div>
 
@@ -1579,7 +1579,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-500 ring-2 ring-[#11141a]" />
               </div>
               <div className="flex flex-col min-w-0">
-                <span className="font-black text-[15px] tracking-tight leading-tight text-white truncate">سوئد پرشیا</span>
+                <span className="font-black text-[15px] tracking-tight leading-tight text-white truncate">Farsi Nord</span>
                 <span className="text-[11px] text-stone-400 font-medium mt-0.5 truncate">سامانه مدیریت نیازمندی‌ها</span>
               </div>
             </div>
@@ -1729,7 +1729,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-[#11141a]" />
               </div>
               <div className="flex flex-col">
-                <span className="font-extrabold text-[13.5px] text-white">سوئد پرشیا</span>
+                <span className="font-extrabold text-[13.5px] text-white">Farsi Nord</span>
                 <span className="text-[10.5px] text-stone-400">سامانه مدیریت نیازمندی‌ها</span>
               </div>
             </div>
