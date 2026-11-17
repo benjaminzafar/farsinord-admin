@@ -165,6 +165,7 @@ export default async function handler(req, res) {
       const country = String(body.country || (req.query && req.query.country) || 'all');
       const category = String(body.category || (req.query && req.query.category) || 'all');
       const status = String(body.status || (req.query && req.query.status) || 'active');
+      const vipOnly = Boolean(body.vipOnly || (req.query && req.query.vipOnly === 'true'));
 
       const from = (page - 1) * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
@@ -177,6 +178,7 @@ export default async function handler(req, res) {
         .range(from, to);
 
       if (status && status !== 'all') q = q.eq('status', status);
+      if (vipOnly) q = q.eq('is_featured', true);
 
       if (country && country !== 'all') q = q.eq('country', country);
       if (category && category !== 'all') q = q.eq('category', category);
@@ -223,6 +225,39 @@ export default async function handler(req, res) {
     if (action === 'delete_ad') {
       const { id } = body;
       const { error } = await supabase.from('swedpersiska_ads').delete().eq('id', id);
+      if (error) throw error;
+      try {
+        const { data: repRow } = await supabase
+          .from('swedpersiska_settings')
+          .select('value')
+          .eq('key', 'ad_reports')
+          .maybeSingle();
+        if (Array.isArray(repRow?.value)) {
+          const filtered = repRow.value.filter((r) => String(r.ad_id) !== String(id));
+          await supabase.from('swedpersiska_settings').upsert({
+            key: 'ad_reports',
+            value: filtered,
+            updated_at: new Date().toISOString()
+          });
+        }
+      } catch {}
+      return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'dismiss_report') {
+      const { reportId } = body;
+      const { data: repRow } = await supabase
+        .from('swedpersiska_settings')
+        .select('value')
+        .eq('key', 'ad_reports')
+        .maybeSingle();
+      const currentList = Array.isArray(repRow?.value) ? repRow.value : [];
+      const nextList = currentList.filter((r) => String(r.id) !== String(reportId));
+      const { error } = await supabase.from('swedpersiska_settings').upsert({
+        key: 'ad_reports',
+        value: nextList,
+        updated_at: new Date().toISOString()
+      });
       if (error) throw error;
       return res.status(200).json({ ok: true });
     }

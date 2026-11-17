@@ -339,6 +339,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     totalViews: 0
   });
   const [adStatusFilter, setAdStatusFilter] = useState('active');
+  const [vipOnlyFilter, setVipOnlyFilter] = useState(false);
+  const [adReports, setAdReports] = useState([]);
   const [countryStats, setCountryStats] = useState({
     se: { total: 0, active: 0, vip: 0, views: 0 },
     no: { total: 0, active: 0, vip: 0, views: 0 },
@@ -484,6 +486,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       if (item.key === 'analytics_settings' && item.value) {
         setAnalyticsSettings(prev => ({ ...prev, ...item.value }));
       }
+      if (item.key === 'ad_reports' && Array.isArray(item.value)) {
+        setAdReports(item.value);
+      }
       if (item.key === 'r2_settings' && item.value) {
         setR2Settings(prev => ({ ...prev, ...item.value }));
       }
@@ -584,10 +589,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   };
 
   // 2. Fetch Ads with Server-side Pagination (10 records limit)
-  const fetchActiveAds = async (page = 1, search = searchQuery, country = countryFilter, cat = categoryFilter, status = adStatusFilter) => {
+  const fetchActiveAds = async (page = 1, search = searchQuery, country = countryFilter, cat = categoryFilter, status = adStatusFilter, vipOnly = vipOnlyFilter) => {
     setActiveLoading(true);
     try {
-      const apiRes = await adminApi.request('active_ads', { page, search, country, category: cat, status });
+      const apiRes = await adminApi.request('active_ads', { page, search, country, category: cat, status, vipOnly });
       if (apiRes && apiRes.unauthorized) {
         setIsAuthenticated(false);
         return;
@@ -610,6 +615,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
       if (status && status !== 'all') {
         q = q.eq('status', status);
+      }
+      if (vipOnly) {
+        q = q.eq('is_featured', true);
       }
 
       if (country && country !== 'all') {
@@ -972,6 +980,31 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       if (onRefreshAds) onRefreshAds();
     } catch (err) {
       alert('خطا در تغییر وضعیت ویژه: ' + err.message);
+    }
+  };
+
+  const openAdsPreset = (statusVal, vipOnlyVal = false) => {
+    setAdStatusFilter(statusVal);
+    setVipOnlyFilter(vipOnlyVal);
+    handleTabChange('ads');
+    fetchActiveAds(1, searchQuery, countryFilter, categoryFilter, statusVal, vipOnlyVal);
+  };
+
+  const dismissReportAdmin = async (reportId) => {
+    try {
+      const apiRes = await adminApi.request('dismiss_report', { reportId });
+      if (!apiRes) {
+        const nextList = adReports.filter(r => String(r.id) !== String(reportId));
+        await supabase.from('swedpersiska_settings').upsert({
+          key: 'ad_reports',
+          value: nextList,
+          updated_at: new Date().toISOString()
+        });
+      }
+      setAdReports(prev => prev.filter(r => String(r.id) !== String(reportId)));
+      triggerToast('گزارش بسته شد.');
+    } catch (err) {
+      alert('خطا در بستن گزارش: ' + err.message);
     }
   };
 
@@ -1560,6 +1593,89 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     activeTab === 'ads' ? 'bg-slate-900 text-white' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
                   }`}>
                     {counts.active}
+                  </span>
+                )}
+              </button>
+
+              {/* Pending Moderation Queue */}
+              <button
+                type="button"
+                onClick={() => openAdsPreset('pending', false)}
+                className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.99] cursor-pointer group ${
+                  activeTab === 'ads' && adStatusFilter === 'pending' && !vipOnlyFilter
+                    ? 'bg-white text-slate-950 shadow-md font-bold'
+                    : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                    activeTab === 'ads' && adStatusFilter === 'pending' && !vipOnlyFilter
+                      ? 'bg-amber-500 text-white shadow-sm'
+                      : 'bg-white/10 text-amber-300 group-hover:bg-white/15'
+                  }`}>
+                    <Bell size={17} />
+                  </div>
+                  <span className="truncate">در انتظار تایید</span>
+                </div>
+                {(counts.pending || 0) > 0 && (
+                  <span className="flex h-6 min-w-[26px] items-center justify-center rounded-lg px-2 text-[11px] tabular-nums font-bold bg-amber-500 text-white shadow-xs">
+                    {counts.pending}
+                  </span>
+                )}
+              </button>
+
+              {/* VIP Ads Only */}
+              <button
+                type="button"
+                onClick={() => openAdsPreset('active', true)}
+                className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.99] cursor-pointer group ${
+                  activeTab === 'ads' && vipOnlyFilter
+                    ? 'bg-white text-slate-950 shadow-md font-bold'
+                    : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                    activeTab === 'ads' && vipOnlyFilter
+                      ? 'bg-amber-600 text-white shadow-sm'
+                      : 'bg-white/10 text-amber-300 group-hover:bg-white/15'
+                  }`}>
+                    <Sparkles size={17} />
+                  </div>
+                  <span className="truncate">آگهی‌های ویژه (VIP)</span>
+                </div>
+                {counts.vip > 0 && (
+                  <span className={`flex h-6 min-w-[26px] items-center justify-center rounded-lg px-2 text-[11px] tabular-nums font-bold ${
+                    activeTab === 'ads' && vipOnlyFilter ? 'bg-slate-900 text-white' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  }`}>
+                    {counts.vip}
+                  </span>
+                )}
+              </button>
+
+              {/* Abuse Reports Queue */}
+              <button
+                type="button"
+                onClick={() => handleTabChange('reports')}
+                className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.99] cursor-pointer group ${
+                  activeTab === 'reports'
+                    ? 'bg-white text-slate-950 shadow-md font-bold'
+                    : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                    activeTab === 'reports'
+                      ? 'bg-rose-600 text-white shadow-sm'
+                      : 'bg-white/10 text-rose-300 group-hover:bg-white/15'
+                  }`}>
+                    <AlertCircle size={17} />
+                  </div>
+                  <span className="truncate">گزارش‌های تخلف</span>
+                </div>
+                {adReports.length > 0 && (
+                  <span className="flex h-6 min-w-[26px] items-center justify-center rounded-lg px-2 text-[11px] tabular-nums font-bold bg-rose-600 text-white shadow-xs">
+                    {adReports.length}
                   </span>
                 )}
               </button>
@@ -2274,7 +2390,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                           onClick={() => {
                             playFeedback('select');
                             setAdStatusFilter(st.id);
-                            fetchActiveAds(1, searchQuery, countryFilter, categoryFilter, st.id);
+                            fetchActiveAds(1, searchQuery, countryFilter, categoryFilter, st.id, vipOnlyFilter);
                           }}
                           className={`min-h-[30px] px-3.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all select-none active:scale-95 cursor-pointer ${
                             active
@@ -2289,6 +2405,25 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       );
                     })}
                   </div>
+
+                  {/* VIP Only Toggle Pill */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playFeedback('select');
+                      const nextVip = !vipOnlyFilter;
+                      setVipOnlyFilter(nextVip);
+                      fetchActiveAds(1, searchQuery, countryFilter, categoryFilter, adStatusFilter, nextVip);
+                    }}
+                    className={`min-h-[34px] px-3.5 rounded-xl text-xs font-bold whitespace-nowrap border inline-flex items-center gap-1.5 transition-all select-none active:scale-95 cursor-pointer ${
+                      vipOnlyFilter
+                        ? 'bg-amber-50 text-amber-900 border-amber-300 shadow-2xs'
+                        : 'bg-stone-50 text-stone-600 border-stone-200 hover:text-stone-900'
+                    }`}
+                  >
+                    <Sparkles size={13} className={vipOnlyFilter ? 'text-amber-600' : 'text-stone-400'} />
+                    <span>فقط ویژه ({counts.vip || 0})</span>
+                  </button>
                 </div>
 
                 {/* 1. Country Filter Pills */}
@@ -2701,6 +2836,92 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 />
               </div>
 
+            </div>
+          )}
+
+          {/* ========================================================
+              TAB: ABUSE REPORTS QUEUE
+          ======================================================== */}
+          {activeTab === 'reports' && (
+            <div className="space-y-4 w-full animate-in fade-in duration-150 ease-out">
+              <div className="p-4 sm:p-5 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.03)] flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 flex items-center justify-center shrink-0">
+                    <AlertCircle size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-extrabold text-stone-900">گزارش‌های تخلف کاربران</h3>
+                    <p className="text-xs text-stone-500">بررسی و حذف سریع آگهی‌های گزارش‌شده</p>
+                  </div>
+                </div>
+                <span className="px-3 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold tabular-nums">
+                  {adReports.length} گزارش
+                </span>
+              </div>
+
+              {adReports.length === 0 ? (
+                <div className="p-12 rounded-2xl border border-stone-200/80 bg-white text-center space-y-2">
+                  <CheckCircle size={32} className="mx-auto text-emerald-500" />
+                  <p className="text-sm font-bold text-stone-800">هیچ گزارش تخلفی وجود ندارد</p>
+                  <p className="text-xs text-stone-500">تمامی آگهی‌های گزارش‌شده بررسی شده‌اند.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {adReports.map((rep) => (
+                    <div key={rep.id} className="p-4 rounded-2xl border border-stone-200/80 bg-white shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold">
+                            {rep.reason}
+                          </span>
+                          {rep.reference_number && (
+                            <span className="font-mono text-[11px] font-bold text-stone-600 bg-stone-100 px-2 py-0.5 rounded-md">
+                              <bdi>{rep.reference_number}</bdi>
+                            </span>
+                          )}
+                          <span className="text-[11px] text-stone-400 font-mono">
+                            {rep.created_at ? new Date(rep.created_at).toLocaleDateString('sv-SE') : ''}
+                          </span>
+                        </div>
+                        <p className="text-sm font-bold text-stone-900 truncate">{rep.title || 'آگهی گزارش‌شده'}</p>
+                        {rep.details && <p className="text-xs text-stone-600">{rep.details}</p>}
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const base = (getMainSiteUrl() || 'https://swedpersiska.vercel.app').replace(/\/+$/, '');
+                            window.open(`${base}/?ad=${rep.reference_number || rep.ad_id}`, '_blank', 'noopener,noreferrer');
+                          }}
+                          className="h-9 px-3 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <ExternalLink size={13} />
+                          <span>مشاهده</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await deleteAdAdmin(rep.ad_id);
+                            setAdReports(prev => prev.filter(r => String(r.ad_id) !== String(rep.ad_id)));
+                          }}
+                          className="h-9 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Trash2 size={13} />
+                          <span>حذف آگهی</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => dismissReportAdmin(rep.id)}
+                          className="h-9 px-3 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold cursor-pointer"
+                        >
+                          بستن گزارش
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
