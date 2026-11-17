@@ -95,9 +95,10 @@ export default async function handler(req, res) {
 
     // 3. Protected Admin Actions
     if (action === 'overview') {
-      const [totalRes, activeRes, vipRes, recentRes, metaRes, settingsRes] = await Promise.all([
+      const [totalRes, activeRes, pendingRes, vipRes, recentRes, metaRes, settingsRes] = await Promise.all([
         supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }),
         supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+        supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
         supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('is_featured', true),
         supabase.from('swedpersiska_ads').select('*').eq('status', 'active').order('created_at', { ascending: false }).limit(5),
         supabase.from('swedpersiska_ads').select('category, country, status, is_featured, views_count'),
@@ -131,6 +132,7 @@ export default async function handler(req, res) {
         counts: {
           total: totalRes.count ?? 0,
           active: activeRes.count ?? 0,
+          pending: pendingRes.count ?? 0,
           vip: vipRes.count ?? 0,
           totalViews
         },
@@ -162,6 +164,7 @@ export default async function handler(req, res) {
       const search = String(body.search || (req.query && req.query.search) || '').trim();
       const country = String(body.country || (req.query && req.query.country) || 'all');
       const category = String(body.category || (req.query && req.query.category) || 'all');
+      const status = String(body.status || (req.query && req.query.status) || 'active');
 
       const from = (page - 1) * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
@@ -169,10 +172,11 @@ export default async function handler(req, res) {
       let q = supabase
         .from('swedpersiska_ads')
         .select('*', { count: 'exact' })
-        .eq('status', 'active')
         .order('is_featured', { ascending: false })
         .order('created_at', { ascending: false })
         .range(from, to);
+
+      if (status && status !== 'all') q = q.eq('status', status);
 
       if (country && country !== 'all') q = q.eq('country', country);
       if (category && category !== 'all') q = q.eq('category', category);
@@ -192,6 +196,19 @@ export default async function handler(req, res) {
     if (action === 'toggle_featured') {
       const { id, is_featured } = body;
       const { error } = await supabase.from('swedpersiska_ads').update({ is_featured: !!is_featured }).eq('id', id);
+      if (error) throw error;
+      return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'update_status') {
+      const { id, status } = body;
+      if (!['active', 'pending', 'rejected'].includes(status)) {
+        return res.status(400).json({ ok: false, error: 'Invalid status value' });
+      }
+      const { error } = await supabase
+        .from('swedpersiska_ads')
+        .update({ status, updated_at: new Date().toISOString() })
+        .eq('id', id);
       if (error) throw error;
       return res.status(200).json({ ok: true });
     }

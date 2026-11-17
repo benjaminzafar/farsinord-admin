@@ -334,9 +334,11 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [counts, setCounts] = useState({
     total: 0,
     active: 0,
+    pending: 0,
     vip: 0,
     totalViews: 0
   });
+  const [adStatusFilter, setAdStatusFilter] = useState('active');
   const [countryStats, setCountryStats] = useState({
     se: { total: 0, active: 0, vip: 0, views: 0 },
     no: { total: 0, active: 0, vip: 0, views: 0 },
@@ -519,9 +521,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         return;
       }
 
-      const [totalRes, activeRes, vipRes, recentRes, metaRes, settingsRes] = await Promise.all([
+      const [totalRes, activeRes, pendingRes, vipRes, recentRes, metaRes, settingsRes] = await Promise.all([
         supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }),
         supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+        supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
         supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('is_featured', true),
         supabase.from('swedpersiska_ads').select('*').eq('status', 'active').order('created_at', { ascending: false }).limit(5),
         supabase.from('swedpersiska_ads').select('category, country, status, is_featured, views_count'),
@@ -530,6 +533,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
       const tot = totalRes.count ?? 0;
       const act = activeRes.count ?? 0;
+      const pend = pendingRes.count ?? 0;
       const vip = vipRes.count ?? 0;
 
       // Compute aggregates
@@ -559,6 +563,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       setCounts({
         total: tot,
         active: act,
+        pending: pend,
         vip: vip,
         totalViews: totalV
       });
@@ -578,11 +583,11 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   };
 
-  // 2. Fetch Active Ads with Server-side Pagination (10 records limit)
-  const fetchActiveAds = async (page = 1, search = searchQuery, country = countryFilter, cat = categoryFilter) => {
+  // 2. Fetch Ads with Server-side Pagination (10 records limit)
+  const fetchActiveAds = async (page = 1, search = searchQuery, country = countryFilter, cat = categoryFilter, status = adStatusFilter) => {
     setActiveLoading(true);
     try {
-      const apiRes = await adminApi.request('active_ads', { page, search, country, category: cat });
+      const apiRes = await adminApi.request('active_ads', { page, search, country, category: cat, status });
       if (apiRes && apiRes.unauthorized) {
         setIsAuthenticated(false);
         return;
@@ -600,9 +605,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       let q = supabase
         .from('swedpersiska_ads')
         .select('*', { count: 'exact' })
-        .eq('status', 'active')
         .order('created_at', { ascending: false })
         .range(from, to);
+
+      if (status && status !== 'all') {
+        q = q.eq('status', status);
+      }
 
       if (country && country !== 'all') {
         q = q.eq('country', country);
@@ -964,6 +972,36 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       if (onRefreshAds) onRefreshAds();
     } catch (err) {
       alert('خطا در تغییر وضعیت ویژه: ' + err.message);
+    }
+  };
+
+  // Approve Pending Ad (Publish to site)
+  const approveAdAdmin = async (adId) => {
+    playFeedback('vip');
+    try {
+      const apiRes = await adminApi.request('update_status', { id: adId, status: 'active' });
+      if (!apiRes) {
+        const { error } = await supabase
+          .from('swedpersiska_ads')
+          .update({ status: 'active', updated_at: new Date().toISOString() })
+          .eq('id', adId);
+        if (error) throw error;
+      }
+      setActiveAds(prev =>
+        adStatusFilter === 'pending'
+          ? prev.filter(a => a.id !== adId)
+          : prev.map(a => a.id === adId ? { ...a, status: 'active' } : a)
+      );
+      setCounts(prev => ({
+        ...prev,
+        active: prev.active + 1,
+        pending: Math.max(0, (prev.pending || 0) - 1),
+      }));
+      setSelectedAdForModal(prev => prev && prev.id === adId ? { ...prev, status: 'active' } : prev);
+      triggerToast('آگهی تایید و در سایت منتشر شد.');
+      if (onRefreshAds) onRefreshAds();
+    } catch (err) {
+      alert('خطا در تایید آگهی: ' + err.message);
     }
   };
 
@@ -2218,7 +2256,41 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               
               {/* Filter Controls Bar */}
               <div className="p-4 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-3">
-                
+
+                {/* 0. Status Moderation Queue Pills */}
+                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 border-b border-stone-100">
+                  <span className="text-xs font-bold text-stone-500 shrink-0">وضعیت:</span>
+                  <div className="p-1 rounded-xl bg-stone-100/80 border border-stone-200/80 inline-flex items-center gap-1">
+                    {[
+                      { id: 'pending', label: `در انتظار تایید (${counts.pending || 0})`, highlight: (counts.pending || 0) > 0 },
+                      { id: 'active', label: `منتشر شده (${counts.active || 0})` },
+                      { id: 'all', label: `همه (${counts.total || 0})` },
+                    ].map(st => {
+                      const active = adStatusFilter === st.id;
+                      return (
+                        <button
+                          key={st.id}
+                          type="button"
+                          onClick={() => {
+                            playFeedback('select');
+                            setAdStatusFilter(st.id);
+                            fetchActiveAds(1, searchQuery, countryFilter, categoryFilter, st.id);
+                          }}
+                          className={`min-h-[30px] px-3.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all select-none active:scale-95 cursor-pointer ${
+                            active
+                              ? 'bg-white text-zinc-950 shadow-xs'
+                              : st.highlight
+                                ? 'text-amber-800 bg-amber-50 hover:bg-amber-100'
+                                : 'text-stone-600 hover:text-zinc-950 hover:bg-white/50'
+                          }`}
+                        >
+                          {st.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* 1. Country Filter Pills */}
                 <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
                   <span className="text-xs font-bold text-stone-500 shrink-0">کشور:</span>
@@ -2406,6 +2478,17 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                             </div>
 
                             <div className="flex items-center gap-2 pt-1">
+                              {ad.status !== 'active' && (
+                                <button
+                                  type="button"
+                                  onClick={() => approveAdAdmin(ad.id)}
+                                  className="h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11.5px] font-bold flex items-center justify-center gap-1 cursor-pointer active:scale-95 shrink-0"
+                                  title="تایید و انتشار در سایت"
+                                >
+                                  <CheckCircle2 size={14} />
+                                  <span>تایید</span>
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => setSelectedAdForModal(ad)}
@@ -2552,6 +2635,17 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                               {/* 8. Actions */}
                               <td className="py-2.5 px-3 text-center align-middle">
                                 <div className="flex items-center justify-center gap-1">
+                                  {ad.status !== 'active' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => approveAdAdmin(ad.id)}
+                                      className="h-8 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors active:scale-95"
+                                      title="تایید و انتشار در سایت"
+                                    >
+                                      <CheckCircle2 size={13} />
+                                      <span>تایید</span>
+                                    </button>
+                                  )}
                                   {/* View Full Info Modal */}
                                   <button
                                     type="button"
