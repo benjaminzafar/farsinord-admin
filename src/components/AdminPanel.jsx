@@ -364,6 +364,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
   // Centered Detail Modal & Toast State
   const [selectedAdForModal, setSelectedAdForModal] = useState(null);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifRef = useRef(null);
   const [copiedKey, setCopiedKey] = useState(null);
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
 
@@ -1395,6 +1397,19 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [cityModal.isOpen, cityToDelete, categoryModal.isOpen, categoryToDelete, selectedAdForModal, mobileSidebarOpen, searchQuery, categorySearchQuery, onClose]);
 
+  useEffect(() => {
+    if (!notifOpen) return;
+    const handleOutside = (e) => {
+      if (notifRef.current && !notifRef.current.contains(e.target)) {
+        setNotifOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [notifOpen]);
+
+  const notifCount = (counts.pending || 0) + adReports.length;
+
   // ========================================================
   // LOGIN SCREEN - Apple Eye-Comfort Soft-White Focus Card
   // ========================================================
@@ -1806,20 +1821,89 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               )}
             </div>
 
-            {/* Notification Bell (Full 40x40px button with non-overlapping badge) */}
-            <button
-              type="button"
-              onClick={() => handleTabChange('ads')}
-              className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-700 hover:text-stone-950 hover:bg-stone-50 transition-colors shadow-sm active:scale-95 cursor-pointer shrink-0"
-              title={`${counts.active} آگهی فعال در سیستم`}
-            >
-              <Bell size={17} className="text-stone-700" />
-              {counts.active > 0 && (
-                <span className="absolute -top-1.5 -left-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white ring-2 ring-white shadow-sm tabular-nums">
-                  {counts.active}
-                </span>
+            {/* Notification Bell + Interactive Popover (Pending Ads + Abuse Reports) */}
+            <div className="relative shrink-0" ref={notifRef}>
+              <button
+                type="button"
+                onClick={() => setNotifOpen(v => !v)}
+                className={`relative flex h-10 w-10 items-center justify-center rounded-xl border transition-colors shadow-sm active:scale-95 cursor-pointer ${
+                  notifOpen
+                    ? 'border-blue-300 bg-blue-50 text-blue-700'
+                    : 'border-stone-200 bg-white text-stone-700 hover:text-stone-950 hover:bg-stone-50'
+                }`}
+                title={notifCount > 0 ? `${notifCount} مورد نیازمند بررسی` : 'اعلان جدیدی وجود ندارد'}
+              >
+                <Bell size={17} />
+                {notifCount > 0 && (
+                  <span className="absolute -top-1.5 -left-1.5 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-600 px-1.5 text-[10px] font-bold text-white ring-2 ring-white shadow-sm tabular-nums">
+                    {notifCount}
+                  </span>
+                )}
+              </button>
+
+              {notifOpen && (
+                <div className="absolute left-0 top-full mt-2 w-72 rounded-2xl bg-white border border-stone-200 shadow-[0_14px_40px_rgba(29,29,31,0.14)] p-2 z-50 animate-in fade-in-50 zoom-in-95 duration-150">
+                  <div className="px-3 py-2 border-b border-stone-100 flex items-center justify-between">
+                    <span className="text-xs font-extrabold text-stone-900">اعلان‌های مدیریت</span>
+                    {notifCount > 0 && (
+                      <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 tabular-nums">
+                        {notifCount} مورد
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="py-1 space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNotifOpen(false);
+                        openAdsPreset('pending', false);
+                      }}
+                      className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-amber-50/70 text-right transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-8 w-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                          <Bell size={15} />
+                        </div>
+                        <div>
+                          <span className="block text-xs font-bold text-stone-900">آگهی‌های در انتظار تایید</span>
+                          <span className="block text-[10.5px] text-stone-500">بررسی پیش از انتشار در سایت</span>
+                        </div>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums ${
+                        (counts.pending || 0) > 0 ? 'bg-amber-500 text-white' : 'bg-stone-100 text-stone-500'
+                      }`}>
+                        {counts.pending || 0}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNotifOpen(false);
+                        handleTabChange('reports');
+                      }}
+                      className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-rose-50/70 text-right transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-8 w-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center shrink-0">
+                          <AlertCircle size={15} />
+                        </div>
+                        <div>
+                          <span className="block text-xs font-bold text-stone-900">گزارش‌های تخلف کاربران</span>
+                          <span className="block text-[10.5px] text-stone-500">آگهی‌های نیازمند رسیدگی</span>
+                        </div>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums ${
+                        adReports.length > 0 ? 'bg-rose-600 text-white' : 'bg-stone-100 text-stone-500'
+                      }`}>
+                        {adReports.length}
+                      </span>
+                    </button>
+                  </div>
+                </div>
               )}
-            </button>
+            </div>
 
           </div>
         </header>
@@ -1846,6 +1930,27 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  if ((counts.pending || 0) > 0) {
+                    openAdsPreset('pending', false);
+                  } else if (adReports.length > 0) {
+                    handleTabChange('reports');
+                  } else {
+                    openAdsPreset('pending', false);
+                  }
+                }}
+                className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-700 hover:text-stone-900 hover:bg-stone-50 shadow-2xs active:scale-95 cursor-pointer"
+                title="اعلان‌های مدیریت"
+              >
+                <Bell size={15} />
+                {notifCount > 0 && (
+                  <span className="absolute -top-1 -left-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-600 px-1 text-[9.5px] font-bold text-white ring-2 ring-white tabular-nums">
+                    {notifCount}
+                  </span>
+                )}
+              </button>
               <button
                 type="button"
                 onClick={fetchAdminData}
