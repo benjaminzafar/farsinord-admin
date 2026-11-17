@@ -1074,7 +1074,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   };
 
-  // Upload Logo or Favicon directly to Cloudflare R2
+  // Upload Logo or Favicon via Admin Server API to Cloudflare R2 (bypasses browser CORS)
   const handleBrandingFileUpload = async (file, kind) => {
     if (!file) return;
     if (file.size > 1048576) {
@@ -1083,21 +1083,22 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
     setUploadingBrandKey(kind);
     try {
-      const res = await adminApi.request('presign_branding_upload', {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const base64Part = dataUrl.includes(',') ? dataUrl.split(',')[1] : '';
+      if (!base64Part) throw new Error('خطا در خواندن فایل تصویر.');
+
+      const res = await adminApi.request('upload_branding_file', {
         kind,
         contentType: file.type || 'image/png',
-        fileSize: file.size,
+        fileBase64: base64Part,
       });
-      if (!res || !res.ok || !res.uploadUrl || !res.publicUrl) {
-        throw new Error(res?.error || 'خطا در دریافت مجوز آپلود (بررسی کنید Cloudflare R2 فعال باشد).');
-      }
-      const putRes = await fetch(res.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type || 'image/png' },
-        body: file,
-      });
-      if (!putRes.ok) {
-        throw new Error('آپلود فایل با خطا مواجه شد.');
+      if (!res || !res.ok || !res.publicUrl) {
+        throw new Error(res?.error || 'خطا در آپلود فایل (بررسی کنید Cloudflare R2 فعال باشد).');
       }
       if (kind === 'favicon') {
         setFaviconUrl(res.publicUrl);

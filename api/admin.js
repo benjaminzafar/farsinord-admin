@@ -314,14 +314,15 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
-    if (action === 'presign_branding_upload') {
+    if (action === 'upload_branding_file') {
       const contentType = String(body.contentType || '').toLowerCase();
-      const fileSize = Number(body.fileSize || 0);
+      const fileBase64 = String(body.fileBase64 || '');
       const ext = BRANDING_MIME_TYPES[contentType];
       if (!ext) {
         return res.status(400).json({ ok: false, error: 'فرمت فایل مجاز نیست (PNG, JPG, WebP, SVG, ICO).' });
       }
-      if (fileSize <= 0 || fileSize > 1048576) {
+      const buf = Buffer.from(fileBase64, 'base64');
+      if (!buf.length || buf.length > 1048576) {
         return res.status(400).json({ ok: false, error: 'حداکثر حجم فایل لوگو یا آیکون ۱ مگابایت است.' });
       }
 
@@ -360,9 +361,19 @@ export default async function handler(req, res) {
         contentType,
       });
 
+      const putRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': contentType },
+        body: buf,
+      });
+
+      if (!putRes.ok) {
+        const errText = await putRes.text().catch(() => '');
+        return res.status(502).json({ ok: false, error: `خطا در آپلود به R2 (${putRes.status}): ${errText.slice(0, 120)}` });
+      }
+
       return res.status(200).json({
         ok: true,
-        uploadUrl,
         publicUrl: `${r2.publicUrl}/${objectKey}`,
       });
     }
