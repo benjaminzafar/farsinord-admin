@@ -24,7 +24,6 @@ import {
   Lock,
   ExternalLink,
   ArrowUpRight,
-  TrendingUp,
   Phone,
   Mail,
   Send,
@@ -1397,56 +1396,55 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   }, [cityModal.isOpen, cityToDelete, categoryModal.isOpen, categoryToDelete, selectedAdForModal, mobileSidebarOpen, searchQuery, categorySearchQuery, onClose]);
 
   // ========================================================
-  // LOGIN SCREEN - Relaxed Obsidian Focus Card
+  // LOGIN SCREEN - Apple Eye-Comfort Soft-White Focus Card
   // ========================================================
   if (!isAuthenticated) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#101116]/80 backdrop-blur-sm font-vazir select-none" dir="rtl">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#F5F5F7] font-vazir select-none" dir="rtl">
         
-        {/* Modal Card - Soft & Relaxed Calm Tone */}
-        <div className="relative w-full max-w-sm rounded-3xl bg-[#14151c] border border-zinc-800/80 p-7 sm:p-8 shadow-2xl space-y-6 z-10 animate-in zoom-in-95 duration-200 text-white">
+        <div className="relative w-full max-w-[400px] rounded-[28px] bg-[#FBFBFC] border border-[#E5E5EA] p-7 sm:p-8 shadow-[0_24px_70px_rgba(29,29,31,0.12)] space-y-6 z-10 animate-in zoom-in-95 duration-200 text-[#1D1D1F]">
           
           {/* Header */}
-          <div className="text-center space-y-2">
-            <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-zinc-950 font-black text-xs shadow-xs">
+          <div className="text-center space-y-2.5">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#1D1D1F] text-[#FBFBFC] font-black text-sm shadow-xs">
               س‌پ
             </div>
             <div>
-              <h2 className="text-base font-extrabold text-white tracking-tight">ورود به مدیریت</h2>
-              <p className="text-[11px] text-zinc-400 font-medium mt-0.5">سوئد پرشیا</p>
+              <h2 className="text-lg font-black text-[#1D1D1F] tracking-tight">ورود به پنل مدیریت</h2>
+              <p className="text-xs text-[#6E6E73] font-medium mt-0.5">سوئد پرشیا — سامانه مدیریت نیازمندی‌ها</p>
             </div>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
             {loginError && (
-              <div className="rounded-xl bg-rose-950/70 border border-rose-800 p-2.5 text-xs font-semibold text-rose-300 flex items-center gap-1.5">
-                <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
+              <div className="rounded-2xl bg-rose-50 border border-rose-200 p-3 text-xs font-semibold text-rose-700 flex items-center gap-2">
+                <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0" />
                 <span>{loginError}</span>
               </div>
             )}
 
             <div>
-              <label className="block text-xs font-semibold text-zinc-300 mb-1.5">ایمیل</label>
+              <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">ایمیل مدیریت</label>
               <input
                 type="email"
                 required
-                placeholder="swedpersiska@gmail.com"
+                placeholder="admin@swedpersiska.se"
                 value={adminEmailInput}
                 onChange={(e) => setAdminEmailInput(e.target.value)}
-                className="w-full rounded-2xl border border-zinc-800 bg-[#0d0e13] hover:border-zinc-700 focus:bg-[#161720] px-3.5 py-2.5 text-xs text-white focus:border-zinc-400 focus:outline-none transition-all font-mono text-left"
+                className="w-full rounded-2xl border border-[#D2D2D7] bg-[#F5F5F7] focus:bg-[#FBFBFC] px-3.5 py-2.5 text-xs text-[#1D1D1F] focus:border-[#0066CC] focus:outline-none transition-all font-mono text-left"
                 dir="ltr"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-zinc-300 mb-1.5">رمز عبور</label>
+              <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">رمز عبور</label>
               <input
                 type="password"
                 required
                 placeholder="••••••••"
                 value={adminPassInput}
                 onChange={(e) => setAdminPassInput(e.target.value)}
-                className="w-full rounded-2xl border border-zinc-800 bg-[#0d0e13] hover:border-zinc-700 focus:bg-[#161720] px-3.5 py-2.5 text-xs text-white focus:border-zinc-400 focus:outline-none transition-all font-mono text-left"
+                className="w-full rounded-2xl border border-[#D2D2D7] bg-[#F5F5F7] focus:bg-[#FBFBFC] px-3.5 py-2.5 text-xs text-[#1D1D1F] focus:border-[#0066CC] focus:outline-none transition-all font-mono text-left"
                 dir="ltr"
               />
             </div>
@@ -1455,7 +1453,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             {turnstileSettings.enabled !== false && turnstileSettings.protectAdminLogin !== false && (
               <div className="pt-1 flex flex-col items-center justify-center">
                 <CloudflareTurnstile
-                  theme="dark"
+                  theme="light"
                   siteKey={turnstileSettings.mode === 'live' ? turnstileSettings.siteKey : undefined}
                   onVerify={(token) => {
                     setAdminTurnstileToken(token);
@@ -1468,18 +1466,18 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
             <button
               type="submit"
-              className="w-full rounded-full bg-white hover:bg-zinc-100 text-zinc-950 font-bold text-xs py-3 shadow-sm active:scale-[0.98] transition-all cursor-pointer"
+              className="w-full h-11 rounded-full bg-[#0066CC] hover:bg-[#0055AA] text-white font-bold text-xs shadow-[0_6px_18px_rgba(0,102,204,0.24)] active:scale-[0.96] transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] cursor-pointer"
             >
-              ورود
+              ورود به پنل
             </button>
           </form>
 
           <button
             type="button"
             onClick={onClose}
-            className="w-full text-center text-xs font-medium text-zinc-400 hover:text-white transition-colors cursor-pointer pt-0.5"
+            className="w-full text-center text-xs font-semibold text-[#6E6E73] hover:text-[#1D1D1F] transition-colors cursor-pointer pt-0.5"
           >
-            بازگشت به سایت
+            بازگشت به وب‌سایت
           </button>
         </div>
       </div>
@@ -1573,24 +1571,26 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               {/* Active Ads */}
               <button
                 type="button"
-                onClick={() => handleTabChange('ads')}
+                onClick={() => openAdsPreset('active', false)}
                 className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.99] cursor-pointer group ${
-                  activeTab === 'ads'
+                  activeTab === 'ads' && adStatusFilter === 'active' && !vipOnlyFilter
                     ? 'bg-white text-slate-950 shadow-md font-bold'
                     : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
                 }`}
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                    activeTab === 'ads' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white/10 text-stone-300 group-hover:text-blue-400 group-hover:bg-white/15'
+                    activeTab === 'ads' && adStatusFilter === 'active' && !vipOnlyFilter
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'bg-white/10 text-stone-300 group-hover:text-blue-400 group-hover:bg-white/15'
                   }`}>
-                    <Layers3 size={17} strokeWidth={activeTab === 'ads' ? 2.3 : 1.9} />
+                    <Layers3 size={17} strokeWidth={activeTab === 'ads' && adStatusFilter === 'active' && !vipOnlyFilter ? 2.3 : 1.9} />
                   </div>
                   <span className="truncate">آگهی‌های فعال</span>
                 </div>
                 {counts.active > 0 && (
                   <span className={`flex h-6 min-w-[26px] items-center justify-center rounded-lg px-2 text-[11px] tabular-nums font-bold ${
-                    activeTab === 'ads' ? 'bg-slate-900 text-white' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                    activeTab === 'ads' && adStatusFilter === 'active' && !vipOnlyFilter ? 'bg-slate-900 text-white' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
                   }`}>
                     {counts.active}
                   </span>
@@ -1988,42 +1988,75 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           {activeTab === 'overview' && (
             <div className="space-y-5 sm:space-y-6 w-full animate-in fade-in duration-150 ease-out">
               
-              {/* 1. ROW 1: 4 Key Executive Metric Cards */}
+              {/* 1. ROW 1: 4 Key Actionable Moderation & VIP Metric Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 
-                {/* Card 1: کل آگهی‌ها */}
+                {/* Card 1: در انتظار تایید (Pending Review) */}
                 <div 
-                  onClick={() => handleTabChange('ads')}
-                  className="flex flex-col justify-between rounded-2xl border border-stone-200/80 bg-white p-5 text-right shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:border-stone-300 hover:shadow-md active:scale-[0.99] transition-all cursor-pointer group"
+                  onClick={() => openAdsPreset('pending', false)}
+                  className="flex flex-col justify-between rounded-2xl border border-stone-200/80 bg-white p-5 text-right shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:border-amber-300 hover:shadow-md active:scale-[0.99] transition-all cursor-pointer group"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2.5">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 border border-blue-100 shadow-2xs group-hover:scale-105 transition-transform">
-                        <Layers3 size={17} strokeWidth={2} />
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-600 border border-amber-100 shadow-2xs group-hover:scale-105 transition-transform">
+                        <Bell size={17} strokeWidth={2} />
                       </div>
                       <span className="text-[12px] font-bold text-stone-600 uppercase tracking-wider">
-                        کل آگهی‌های پرتال
+                        در انتظار تایید
                       </span>
                     </div>
-                    <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-bold text-blue-700 border border-blue-200/60">
-                      <span className="tabular-nums">{activeAdsCount}</span> فعال
+                    <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold border ${
+                      (counts.pending || 0) > 0
+                        ? 'bg-amber-100 text-amber-900 border-amber-300'
+                        : 'bg-stone-50 text-stone-500 border-stone-200'
+                    }`}>
+                      {(counts.pending || 0) > 0 ? 'نیاز به بررسی' : 'به‌روز'}
                     </span>
                   </div>
-                  <p className="mt-4 text-3xl font-black tracking-tight text-stone-900 group-hover:text-blue-600 transition-colors tabular-nums">
-                    {totalAds}
+                  <p className="mt-4 text-3xl font-black tracking-tight text-stone-900 group-hover:text-amber-600 transition-colors tabular-nums">
+                    {counts.pending || 0}
                   </p>
                   <div className="mt-3 flex items-center justify-between text-[11.5px] text-stone-500 border-t border-stone-100 pt-2.5">
-                    <span>در سراسر کشورهای نوردیک</span>
-                    <span className="font-semibold text-stone-700">
-                      <span className="tabular-nums font-bold">{activeAdsCount}</span> در حال نمایش
-                    </span>
+                    <span>صف بررسی قبل از انتشار</span>
+                    <span className="font-semibold text-amber-700">مشاهده صف ←</span>
                   </div>
                 </div>
 
-                {/* Card 2: آگهی‌های ویژه */}
+                {/* Card 2: گزارش‌های تخلف (Abuse Reports) */}
                 <div 
-                  onClick={() => handleTabChange('ads')}
-                  className="flex flex-col justify-between rounded-2xl border border-stone-200/80 bg-white p-5 text-right shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:border-stone-300 hover:shadow-md active:scale-[0.99] transition-all cursor-pointer group"
+                  onClick={() => handleTabChange('reports')}
+                  className="flex flex-col justify-between rounded-2xl border border-stone-200/80 bg-white p-5 text-right shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:border-rose-300 hover:shadow-md active:scale-[0.99] transition-all cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600 border border-rose-100 shadow-2xs group-hover:scale-105 transition-transform">
+                        <AlertCircle size={17} strokeWidth={2} />
+                      </div>
+                      <span className="text-[12px] font-bold text-stone-600 uppercase tracking-wider">
+                        گزارش‌های تخلف
+                      </span>
+                    </div>
+                    <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold border ${
+                      adReports.length > 0
+                        ? 'bg-rose-100 text-rose-800 border-rose-300'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    }`}>
+                      {adReports.length > 0 ? 'هشدار' : 'امن'}
+                    </span>
+                  </div>
+                  <p className="mt-4 text-3xl font-black tracking-tight text-stone-900 group-hover:text-rose-600 transition-colors tabular-nums">
+                    {adReports.length}
+                  </p>
+                  <div className="mt-3 flex items-center justify-between text-[11.5px] text-stone-500 border-t border-stone-100 pt-2.5">
+                    <span>گزارش‌های ارسالی کاربران</span>
+                    <span className="font-semibold text-rose-700">بررسی گزارش‌ها ←</span>
+                  </div>
+                </div>
+
+                {/* Card 3: آگهی‌های ویژه (VIP Ads Only) */}
+                <div 
+                  onClick={() => openAdsPreset('active', true)}
+                  className="flex flex-col justify-between rounded-2xl border border-stone-200/80 bg-white p-5 text-right shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:border-amber-300 hover:shadow-md active:scale-[0.99] transition-all cursor-pointer group"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2.5">
@@ -2031,11 +2064,11 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                         <Sparkles size={17} strokeWidth={2} />
                       </div>
                       <span className="text-[12px] font-bold text-stone-600 uppercase tracking-wider">
-                        آگهی‌های ویژه
+                        آگهی‌های ویژه (VIP)
                       </span>
                     </div>
                     <span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold text-amber-800 border border-amber-200/70">
-                      جایگاه بالا
+                      فقط VIP
                     </span>
                   </div>
                   <p className="mt-4 text-3xl font-black tracking-tight text-stone-900 group-hover:text-amber-600 transition-colors tabular-nums">
@@ -2043,64 +2076,34 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   </p>
                   <div className="mt-3 flex items-center justify-between text-[11.5px] text-stone-500 border-t border-stone-100 pt-2.5">
                     <span>دارای اولویت و برچسب طلایی</span>
-                    <span className="font-semibold text-amber-700">فعال در پرتال</span>
+                    <span className="font-semibold text-amber-700">فیلتر ویژه ←</span>
                   </div>
                 </div>
 
-                {/* Card 3: درآمد کل ویژه */}
+                {/* Card 4: آگهی‌های فعال پرتال */}
                 <div 
-                  onClick={() => handleTabChange('monetization')}
-                  className="flex flex-col justify-between rounded-2xl border border-stone-200/80 bg-white p-5 text-right shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:border-stone-300 hover:shadow-md active:scale-[0.99] transition-all cursor-pointer group"
+                  onClick={() => openAdsPreset('active', false)}
+                  className="flex flex-col justify-between rounded-2xl border border-stone-200/80 bg-white p-5 text-right shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:border-blue-300 hover:shadow-md active:scale-[0.99] transition-all cursor-pointer group"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2.5">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100 shadow-2xs group-hover:scale-105 transition-transform">
-                        <WalletCards size={17} strokeWidth={2} />
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 border border-blue-100 shadow-2xs group-hover:scale-105 transition-transform">
+                        <Layers3 size={17} strokeWidth={2} />
                       </div>
                       <span className="text-[12px] font-bold text-stone-600 uppercase tracking-wider">
-                        درآمد ارتقای ویژه
+                        آگهی‌های فعال
                       </span>
                     </div>
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 border border-emerald-200/60">
-                      درگاه آنلاین
+                    <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-[11px] font-bold text-blue-700 border border-blue-200/60">
+                      <span className="tabular-nums">{totalViews.toLocaleString('sv-SE')}</span> بازدید
                     </span>
                   </div>
-                  <p className="mt-4 text-3xl font-black tracking-tight text-stone-900 group-hover:text-emerald-600 transition-colors tabular-nums">
-                    {((vipAds || 0) * (stripeSettings.vipPrice || 99)).toLocaleString('sv-SE')}{' '}
-                    <span className="text-sm font-semibold text-stone-500">کرون</span>
+                  <p className="mt-4 text-3xl font-black tracking-tight text-stone-900 group-hover:text-blue-600 transition-colors tabular-nums">
+                    {activeAdsCount}
                   </p>
                   <div className="mt-3 flex items-center justify-between text-[11.5px] text-stone-500 border-t border-stone-100 pt-2.5">
-                    <span>بر اساس تعرفه <span className="tabular-nums font-bold">{stripeSettings.vipPrice || 99}</span> کرون</span>
-                    <span className="font-semibold text-stone-700"><span className="tabular-nums font-bold">{vipAds}</span> تراکنش</span>
-                  </div>
-                </div>
-
-                {/* Card 4: بازدید و ترافیک کل */}
-                <div 
-                  onClick={() => handleTabChange('ads')}
-                  className="flex flex-col justify-between rounded-2xl border border-stone-200/80 bg-white p-5 text-right shadow-[0_1px_3px_rgba(0,0,0,0.03)] hover:border-stone-300 hover:shadow-md active:scale-[0.99] transition-all cursor-pointer group"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-purple-600 border border-purple-100 shadow-2xs group-hover:scale-105 transition-transform">
-                        <TrendingUp size={17} strokeWidth={2} />
-                      </div>
-                      <span className="text-[12px] font-bold text-stone-600 uppercase tracking-wider">
-                        بازدید و تعامل کل
-                      </span>
-                    </div>
-                    <span className="rounded-full bg-purple-50 border border-purple-200/70 px-2.5 py-0.5 text-[11px] font-bold text-purple-700">
-                      ۴ کشور
-                    </span>
-                  </div>
-                  <p className="mt-4 text-3xl font-black tracking-tight text-stone-900 group-hover:text-purple-600 transition-colors tabular-nums">
-                    {totalViews.toLocaleString('sv-SE')}
-                  </p>
-                  <div className="mt-3 flex items-center justify-between text-[11.5px] text-stone-500 border-t border-stone-100 pt-2.5">
-                    <span>میانگین هر آگهی:</span>
-                    <span className="font-semibold text-stone-700">
-                      <span className="tabular-nums font-bold">{totalAds > 0 ? Math.round(totalViews / totalAds) : 0}</span> بازدید
-                    </span>
+                    <span>در حال نمایش در سایت</span>
+                    <span className="font-semibold text-blue-700">مدیریت آگهی‌ها ←</span>
                   </div>
                 </div>
 
