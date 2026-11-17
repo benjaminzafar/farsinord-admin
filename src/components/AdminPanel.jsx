@@ -2485,7 +2485,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                   className="h-9 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11.5px] font-bold flex items-center justify-center gap-1 cursor-pointer active:scale-95 shrink-0"
                                   title="تایید و انتشار در سایت"
                                 >
-                                  <CheckCircle2 size={14} />
+                                  <CheckCircle size={14} />
                                   <span>تایید</span>
                                 </button>
                               )}
@@ -2642,7 +2642,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                       className="h-8 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors active:scale-95"
                                       title="تایید و انتشار در سایت"
                                     >
-                                      <CheckCircle2 size={13} />
+                                      <CheckCircle size={13} />
                                       <span>تایید</span>
                                     </button>
                                   )}
@@ -4285,6 +4285,18 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       <span dir="ltr" className="font-mono">{selectedAdForModal.contact_email}</span>
                     </a>
                   )}
+
+                  {selectedAdForModal.contact_website && !/^(javascript|data|vbscript):/i.test(selectedAdForModal.contact_website.trim()) && (
+                    <a
+                      href={/^https?:\/\//i.test(selectedAdForModal.contact_website.trim()) ? selectedAdForModal.contact_website.trim() : `https://${selectedAdForModal.contact_website.trim()}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-2 text-blue-700 hover:underline sm:col-span-2"
+                    >
+                      <Globe2 size={14} className="shrink-0" />
+                      <span dir="ltr" className="font-mono truncate">{selectedAdForModal.contact_website}</span>
+                    </a>
+                  )}
                 </div>
               </div>
 
@@ -4316,7 +4328,17 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
             {/* Modal Footer Actions */}
             <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-stone-50 border-t border-stone-100 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2.5">
-              <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+                {selectedAdForModal.status !== 'active' && (
+                  <button
+                    type="button"
+                    onClick={() => approveAdAdmin(selectedAdForModal.id)}
+                    className="flex-1 sm:flex-initial h-10 sm:h-9 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all whitespace-nowrap"
+                  >
+                    <CheckCircle size={14} />
+                    <span>تایید و انتشار</span>
+                  </button>
+                )}
                 {/* View on Site */}
                 <button
                   type="button"
