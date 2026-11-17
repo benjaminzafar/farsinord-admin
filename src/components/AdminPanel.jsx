@@ -1530,199 +1530,88 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             </span>
           </div>
 
-          {/* Navigation Group Items */}
-          <div className="flex-1 overflow-y-auto no-scrollbar py-3.5 space-y-4">
+          {/* Navigation Group Items (Clean, fast, text-only Apple-style list) */}
+          <div className="flex-1 overflow-y-auto no-scrollbar py-3.5 space-y-5">
             
             {/* Group 1: داشبورد */}
-            <div className="space-y-1.5">
-              <div className="px-2">
-                <span className="text-[10.5px] font-extrabold uppercase tracking-wider text-stone-400">
+            <div className="space-y-1">
+              <div className="px-3 pb-1">
+                <span className="text-[10.5px] font-bold uppercase tracking-wider text-stone-500">
                   داشبورد اصلی
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => handleTabChange('overview')}
-                className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.99] cursor-pointer group ${
+                className={`flex w-full items-center rounded-xl px-3.5 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.97] cursor-pointer ${
                   activeTab === 'overview'
-                    ? 'bg-white text-slate-950 shadow-md font-bold'
+                    ? 'bg-white text-slate-950 shadow-sm font-bold'
                     : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
                 }`}
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                    activeTab === 'overview' ? 'bg-slate-950 text-white shadow-sm' : 'bg-white/10 text-stone-300 group-hover:text-white group-hover:bg-white/15'
-                  }`}>
-                    <LayoutGrid size={17} strokeWidth={activeTab === 'overview' ? 2.3 : 1.9} />
-                  </div>
-                  <span className="truncate">داشبورد</span>
-                </div>
+                <span className="truncate">داشبورد</span>
               </button>
             </div>
 
             {/* Group 2: مدیریت و درآمد */}
-            <div className="space-y-1.5">
-              <div className="px-2">
-                <span className="text-[10.5px] font-extrabold uppercase tracking-wider text-stone-400">
+            <div className="space-y-1">
+              <div className="px-3 pb-1">
+                <span className="text-[10.5px] font-bold uppercase tracking-wider text-stone-500">
                   مدیریت و درآمد
                 </span>
               </div>
 
-              {/* Active Ads */}
-              <button
-                type="button"
-                onClick={() => openAdsPreset('active', false)}
-                className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.99] cursor-pointer group ${
-                  activeTab === 'ads' && adStatusFilter === 'active' && !vipOnlyFilter
-                    ? 'bg-white text-slate-950 shadow-md font-bold'
-                    : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                    activeTab === 'ads' && adStatusFilter === 'active' && !vipOnlyFilter
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-white/10 text-stone-300 group-hover:text-blue-400 group-hover:bg-white/15'
-                  }`}>
-                    <Layers3 size={17} strokeWidth={activeTab === 'ads' && adStatusFilter === 'active' && !vipOnlyFilter ? 2.3 : 1.9} />
-                  </div>
-                  <span className="truncate">آگهی‌های فعال</span>
-                </div>
-                {counts.active > 0 && (
-                  <span className={`flex h-6 min-w-[26px] items-center justify-center rounded-lg px-2 text-[11px] tabular-nums font-bold ${
-                    activeTab === 'ads' && adStatusFilter === 'active' && !vipOnlyFilter ? 'bg-slate-900 text-white' : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                  }`}>
-                    {counts.active}
-                  </span>
-                )}
-              </button>
-
-              {/* Pending Moderation Queue */}
-              <button
-                type="button"
-                onClick={() => openAdsPreset('pending', false)}
-                className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.99] cursor-pointer group ${
-                  activeTab === 'ads' && adStatusFilter === 'pending' && !vipOnlyFilter
-                    ? 'bg-white text-slate-950 shadow-md font-bold'
-                    : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                    activeTab === 'ads' && adStatusFilter === 'pending' && !vipOnlyFilter
-                      ? 'bg-amber-500 text-white shadow-sm'
-                      : 'bg-white/10 text-amber-300 group-hover:bg-white/15'
-                  }`}>
-                    <Bell size={17} />
-                  </div>
-                  <span className="truncate">در انتظار تایید</span>
-                </div>
-                {(counts.pending || 0) > 0 && (
-                  <span className="flex h-6 min-w-[26px] items-center justify-center rounded-lg px-2 text-[11px] tabular-nums font-bold bg-amber-500 text-white shadow-xs">
-                    {counts.pending}
-                  </span>
-                )}
-              </button>
-
-              {/* VIP Ads Only */}
-              <button
-                type="button"
-                onClick={() => openAdsPreset('active', true)}
-                className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.99] cursor-pointer group ${
-                  activeTab === 'ads' && vipOnlyFilter
-                    ? 'bg-white text-slate-950 shadow-md font-bold'
-                    : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                    activeTab === 'ads' && vipOnlyFilter
-                      ? 'bg-amber-600 text-white shadow-sm'
-                      : 'bg-white/10 text-amber-300 group-hover:bg-white/15'
-                  }`}>
-                    <Sparkles size={17} />
-                  </div>
-                  <span className="truncate">آگهی‌های ویژه (VIP)</span>
-                </div>
-                {counts.vip > 0 && (
-                  <span className={`flex h-6 min-w-[26px] items-center justify-center rounded-lg px-2 text-[11px] tabular-nums font-bold ${
-                    activeTab === 'ads' && vipOnlyFilter ? 'bg-slate-900 text-white' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                  }`}>
-                    {counts.vip}
-                  </span>
-                )}
-              </button>
-
-              {/* Abuse Reports Queue */}
-              <button
-                type="button"
-                onClick={() => handleTabChange('reports')}
-                className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.99] cursor-pointer group ${
-                  activeTab === 'reports'
-                    ? 'bg-white text-slate-950 shadow-md font-bold'
-                    : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                    activeTab === 'reports'
-                      ? 'bg-rose-600 text-white shadow-sm'
-                      : 'bg-white/10 text-rose-300 group-hover:bg-white/15'
-                  }`}>
-                    <AlertCircle size={17} />
-                  </div>
-                  <span className="truncate">گزارش‌های تخلف</span>
-                </div>
-                {adReports.length > 0 && (
-                  <span className="flex h-6 min-w-[26px] items-center justify-center rounded-lg px-2 text-[11px] tabular-nums font-bold bg-rose-600 text-white shadow-xs">
-                    {adReports.length}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleTabChange('categories')}
-                className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.99] cursor-pointer group ${
-                  activeTab === 'categories'
-                    ? 'bg-white text-slate-950 shadow-md font-bold'
-                    : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                    activeTab === 'categories' ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white/10 text-stone-300 group-hover:text-emerald-400 group-hover:bg-white/15'
-                  }`}>
-                    <Shapes size={17} strokeWidth={activeTab === 'categories' ? 2.3 : 1.9} />
-                  </div>
-                  <span className="truncate">دسته‌بندی و شهرها</span>
-                </div>
-                <span className={`flex h-6 min-w-[26px] items-center justify-center rounded-lg px-2 text-[11px] tabular-nums font-bold ${
-                  activeTab === 'categories' ? 'bg-slate-900 text-white' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                }`}>
-                  {categoriesList.length}
-                </span>
-              </button>
-
-              {/* Settings (includes Payment Gateway & Security) */}
-              <button
-                type="button"
-                onClick={() => handleTabChange('settings')}
-                className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-[13.5px] transition-all duration-200 active:scale-[0.99] cursor-pointer group ${
-                  activeTab === 'settings'
-                    ? 'bg-white text-slate-950 shadow-md font-bold'
-                    : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors duration-200 ${
-                    activeTab === 'settings' ? 'bg-purple-600 text-white shadow-sm' : 'bg-white/10 text-stone-300 group-hover:text-purple-400 group-hover:bg-white/15'
-                  }`}>
-                    <SlidersHorizontal size={17} strokeWidth={activeTab === 'settings' ? 2.3 : 1.9} />
-                  </div>
-                  <span className="truncate">تنظیمات سایت</span>
-                </div>
-              </button>
+              {[
+                {
+                  id: 'active-ads',
+                  label: 'آگهی‌های فعال',
+                  active: activeTab === 'ads' && adStatusFilter === 'active' && !vipOnlyFilter,
+                  onClick: () => openAdsPreset('active', false),
+                },
+                {
+                  id: 'pending-ads',
+                  label: 'در انتظار تایید',
+                  active: activeTab === 'ads' && adStatusFilter === 'pending' && !vipOnlyFilter,
+                  onClick: () => openAdsPreset('pending', false),
+                },
+                {
+                  id: 'vip-ads',
+                  label: 'آگهی‌های ویژه (VIP)',
+                  active: activeTab === 'ads' && vipOnlyFilter,
+                  onClick: () => openAdsPreset('active', true),
+                },
+                {
+                  id: 'reports',
+                  label: 'گزارش‌های تخلف',
+                  active: activeTab === 'reports',
+                  onClick: () => handleTabChange('reports'),
+                },
+                {
+                  id: 'categories',
+                  label: 'دسته‌بندی و شهرها',
+                  active: activeTab === 'categories',
+                  onClick: () => handleTabChange('categories'),
+                },
+                {
+                  id: 'settings',
+                  label: 'تنظیمات سایت',
+                  active: activeTab === 'settings',
+                  onClick: () => handleTabChange('settings'),
+                },
+              ].map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={item.onClick}
+                  className={`flex w-full items-center rounded-xl px-3.5 py-2.5 text-[13.5px] transition-all duration-150 active:scale-[0.97] cursor-pointer ${
+                    item.active
+                      ? 'bg-white text-slate-950 shadow-sm font-bold'
+                      : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
+                  }`}
+                >
+                  <span className="truncate">{item.label}</span>
+                </button>
+              ))}
             </div>
 
           </div>
