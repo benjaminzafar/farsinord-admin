@@ -370,7 +370,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
 
   // Site Branding State
-  const [siteName, setSiteName] = useState('فارسی نورد');
+  const [siteName, setSiteName] = useState('لینک شو');
   const [siteSlogan, setSiteSlogan] = useState('نیازمندی‌های فارسی‌زبانان در سراسر اسکاندیناوی');
   const [logoUrl, setLogoUrl] = useState('');
   const [faviconUrl, setFaviconUrl] = useState('');
@@ -383,22 +383,22 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [seoActiveCountry, setSeoActiveCountry] = useState('se');
   const [seoSettings, setSeoSettings] = useState({
     se: {
-      title: 'نیازمندی‌ها، مسکن و خدمات فارسی‌زبانان در سوئد | فارسی نورد',
+      title: 'نیازمندی‌ها، مسکن و خدمات فارسی‌زبانان در سوئد | لینک شو',
       description: 'جامع‌ترین بازارچه آنلاین فارسی‌زبانان مقیم سوئد. رهن و اجاره خانه در استکهلم و گوتنبرگ، رستوران‌ها، استخدام و مشاغل با امکان درج رایگان آگهی.',
       keywords: 'نیازمندیهای سوئد, مسکن استکهلم, رستوران گوتنبرگ, مترجم رسمی سوئد, دارالترجمه مالمو, کار در سوئد'
     },
     no: {
-      title: 'نیازمندی‌ها، مسکن و مشاغل فارسی‌زبانان در نروژ | فارسی نورد',
+      title: 'نیازمندی‌ها، مسکن و مشاغل فارسی‌زبانان در نروژ | لینک شو',
       description: 'پرتال اختصاصی فارسی‌زبانان مقیم نروژ. خرید و اجاره آپارتمان در اسلو و برگن، خدمات حقوقی و دارالترجمه، رستوران‌ها و سوپرمارکت‌ها.',
       keywords: 'نیازمندیهای نروژ, مسکن اسلو, خانه در برگن, رستوران نروژ, مترجم نروژی به فارسی, کار در نروژ'
     },
     dk: {
-      title: 'نیازمندی‌ها، مسکن و خدمات فارسی‌زبانان در دانمارک | فارسی نورد',
+      title: 'نیازمندی‌ها، مسکن و خدمات فارسی‌زبانان در دانمارک | لینک شو',
       description: 'پرتال جامع فارسی‌زبانان مقیم دانمارک. نیازمندی‌های مسکن و اتاق در کپنهاگ و آرهوس، معرفی رستوران‌ها و سوپرمارکت‌ها و خدمات تخصصی.',
       keywords: 'نیازمندیهای دانمارک, مسکن کپنهاگ, خانه در آرهوس, رستوران کپنهاگ, مترجم دانمارکی, صرافی دانمارک'
     },
     fi: {
-      title: 'نیازمندی‌ها، مسکن و مشاغل فارسی‌زبانان در فنلاند | فارسی نورد',
+      title: 'نیازمندی‌ها، مسکن و مشاغل فارسی‌زبانان در فنلاند | لینک شو',
       description: 'سامانه آگهی‌های رایگان فارسی‌زبانان فنلاند. اجاره مسکن در هلسینکی و تامپره، استخدام، خدمات ترجمه و اقامت برای جامعه فارسی‌زبان.',
       keywords: 'نیازمندیهای فنلاند, خانه در هلسینکی, مسکن اسپو, فارسی‌زبانان فنلاند, کار در هلسینکی, مترجم فنلاندی'
     }
@@ -470,7 +470,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     if (!items || !Array.isArray(items)) return;
     items.forEach(item => {
       if (item.key === 'site_branding' && item.value) {
-        setSiteName(item.value.siteName || 'فارسی نورد');
+        const rawName = (item.value.siteName || '').trim();
+        const isLegacy = !rawName || /سوئد\s*پرشیا|سوید\s*پرشیا|پرشیا\s*سو|فارسی\s*نور|swedpersiska|farsi\s*nord|faris\s*nord/i.test(rawName);
+        setSiteName(isLegacy ? 'لینک شو' : rawName);
         setSiteSlogan(item.value.siteSlogan || '');
         setLogoUrl(item.value.logoUrl || '');
         setFaviconUrl(item.value.faviconUrl || '');
@@ -1465,11 +1467,11 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           {/* Header */}
           <div className="text-center space-y-2.5">
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#1D1D1F] text-[#FBFBFC] font-black text-sm shadow-xs">
-              س‌پ
+              ل‌ش
             </div>
             <div>
               <h2 className="text-lg font-black text-[#1D1D1F] tracking-tight">ورود به پنل مدیریت</h2>
-              <p className="text-xs text-[#6E6E73] font-medium mt-0.5">فارسی نورد — سامانه مدیریت نیازمندی‌ها</p>
+              <p className="text-xs text-[#6E6E73] font-medium mt-0.5">لینک شو — سامانه مدیریت نیازمندی‌ها</p>
             </div>
           </div>
 
@@ -1575,11 +1577,11 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           <div className="flex h-16 items-center justify-between px-2 pb-3 border-b border-stone-800/90 shrink-0">
             <div className="flex items-center gap-3 group cursor-pointer min-w-0" onClick={onClose} title="مشاهده وب‌سایت">
               <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-white via-stone-100 to-stone-300 text-slate-950 shadow-md font-black text-sm transition-transform duration-200 group-hover:scale-105 active:scale-95 border border-white/30">
-                <span>س‌پ</span>
+                <span>ل‌ش</span>
                 <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-500 ring-2 ring-[#11141a]" />
               </div>
               <div className="flex flex-col min-w-0">
-                <span className="font-black text-[15px] tracking-tight leading-tight text-white truncate">فارسی نورد</span>
+                <span className="font-black text-[15px] tracking-tight leading-tight text-white truncate">لینک شو</span>
                 <span className="text-[11px] text-stone-400 font-medium mt-0.5 truncate">سامانه مدیریت نیازمندی‌ها</span>
               </div>
             </div>
@@ -1725,11 +1727,11 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           <div className="flex h-16 items-center justify-between px-4 border-b border-stone-800/80 shrink-0">
             <div className="flex items-center gap-3">
               <div className="relative h-10 w-10 rounded-xl bg-white text-zinc-950 font-black text-xs flex items-center justify-center shadow-sm">
-                س‌پ
+                ل‌ش
                 <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-[#11141a]" />
               </div>
               <div className="flex flex-col">
-                <span className="font-extrabold text-[13.5px] text-white">فارسی نورد</span>
+                <span className="font-extrabold text-[13.5px] text-white">لینک شو</span>
                 <span className="text-[10.5px] text-stone-400">سامانه مدیریت نیازمندی‌ها</span>
               </div>
             </div>
