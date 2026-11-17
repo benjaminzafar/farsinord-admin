@@ -7,7 +7,13 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABAS
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 const PAGE_SIZE = 10;
-const TOKEN_SECRET = process.env.ADMIN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'swedpersiska-admin-hmac-secret-2026';
+const EPHEMERAL_FALLBACK_SECRET = crypto.randomBytes(32).toString('hex');
+const TOKEN_SECRET = process.env.ADMIN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || EPHEMERAL_FALLBACK_SECRET;
+
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://farsinord-admin.vercel.app,https://swedpersiska.vercel.app,https://farsinord.vercel.app')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 const BRANDING_MIME_TYPES = {
   'image/jpeg': 'jpg',
@@ -96,12 +102,13 @@ function verifyAdminToken(token) {
 
 function setCorsHeaders(req, res) {
   const origin = req.headers.origin;
-  if (origin) {
+  if (origin && (ALLOWED_ORIGINS.includes(origin) || /^http:\/\/localhost:\d+$/.test(origin))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
 }
 
 export default async function handler(req, res) {
