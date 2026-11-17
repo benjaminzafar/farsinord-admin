@@ -9,6 +9,58 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const PAGE_SIZE = 10;
 const TOKEN_SECRET = process.env.ADMIN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'swedpersiska-admin-hmac-secret-2026';
 
+const BRANDING_MIME_TYPES = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/svg+xml': 'svg',
+  'image/x-icon': 'ico',
+  'image/vnd.microsoft.icon': 'ico',
+};
+
+function encodeRfc3986(str) {
+  return encodeURIComponent(str).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+}
+
+function createR2PresignedPutUrl({ accountId, accessKeyId, secretAccessKey, bucketName, objectKey, contentType, expiresSeconds = 300 }) {
+  const host = `${accountId}.r2.cloudflarestorage.com`;
+  const region = 'auto';
+  const service = 's3';
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
+  const canonicalUri = `/${bucketName}/${objectKey.split('/').map(encodeRfc3986).join('/')}`;
+
+  const queryParams = {
+    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+    'X-Amz-Credential': `${accessKeyId}/${credentialScope}`,
+    'X-Amz-Date': amzDate,
+    'X-Amz-Expires': String(expiresSeconds),
+    'X-Amz-SignedHeaders': 'content-type;host',
+  };
+
+  const canonicalQuery = Object.keys(queryParams)
+    .sort()
+    .map((k) => `${encodeRfc3986(k)}=${encodeRfc3986(queryParams[k])}`)
+    .join('&');
+
+  const canonicalHeaders = `content-type:${contentType}\nhost:${host}\n`;
+  const canonicalRequest = ['PUT', canonicalUri, canonicalQuery, canonicalHeaders, 'content-type;host', 'UNSIGNED-PAYLOAD'].join('\n');
+  const hash = crypto.createHash('sha256').update(canonicalRequest, 'utf8').digest('hex');
+  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, hash].join('\n');
+
+  const hmac = (k, d) => crypto.createHmac('sha256', k).update(d, 'utf8').digest();
+  const kDate = hmac(`AWS4${secretAccessKey}`, dateStamp);
+  const kRegion = hmac(kDate, region);
+  const kService = hmac(kRegion, service);
+  const kSigning = hmac(kService, 'aws4_request');
+  const signature = crypto.createHmac('sha256', kSigning).update(stringToSign, 'utf8').digest('hex');
+
+  return `https://${host}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`;
+}
+
 function safeEqual(a, b) {
   const bufA = Buffer.from(String(a || ''), 'utf8');
   const bufB = Buffer.from(String(b || ''), 'utf8');
@@ -260,6 +312,59 @@ export default async function handler(req, res) {
       });
       if (error) throw error;
       return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'presign_branding_upload') {
+      const contentType = String(body.contentType || '').toLowerCase();
+      const fileSize = Number(body.fileSize || 0);
+      const ext = BRANDING_MIME_TYPES[contentType];
+      if (!ext) {
+        return res.status(400).json({ ok: false, error: 'فرمت فایل مجاز نیست (PNG, JPG, WebP, SVG, ICO).' });
+      }
+      if (fileSize <= 0 || fileSize > 1048576) {
+        return res.status(400).json({ ok: false, error: 'حداکثر حجم فایل لوگو یا آیکون ۱ مگابایت است.' });
+      }
+
+      let r2 = null;
+      if (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET_NAME && process.env.R2_PUBLIC_URL) {
+        r2 = {
+          enabled: true,
+          accountId: process.env.R2_ACCOUNT_ID.trim(),
+          accessKeyId: process.env.R2_ACCESS_KEY_ID.trim(),
+          secretAccessKey: process.env.R2_SECRET_ACCESS_KEY.trim(),
+          bucketName: process.env.R2_BUCKET_NAME.trim(),
+          publicUrl: process.env.R2_PUBLIC_URL.trim().replace(/\/+$/, ''),
+        };
+      } else {
+        const { data: r2Row } = await supabase.from('swedpersiska_settings').select('value').eq('key', 'r2_settings').maybeSingle();
+        if (r2Row?.value?.enabled && r2Row.value.accountId && r2Row.value.accessKeyId && r2Row.value.secretAccessKey && r2Row.value.bucketName && r2Row.value.publicUrl) {
+          r2 = {
+            ...r2Row.value,
+            publicUrl: String(r2Row.value.publicUrl).trim().replace(/\/+$/, ''),
+          };
+        }
+      }
+
+      if (!r2) {
+        return res.status(400).json({ ok: false, error: 'فضای ابری Cloudflare R2 در تنظیمات فعال نشده است.' });
+      }
+
+      const kind = body.kind === 'favicon' ? 'favicon' : 'logo';
+      const objectKey = `branding/${kind}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+      const uploadUrl = createR2PresignedPutUrl({
+        accountId: r2.accountId,
+        accessKeyId: r2.accessKeyId,
+        secretAccessKey: r2.secretAccessKey,
+        bucketName: r2.bucketName,
+        objectKey,
+        contentType,
+      });
+
+      return res.status(200).json({
+        ok: true,
+        uploadUrl,
+        publicUrl: `${r2.publicUrl}/${objectKey}`,
+      });
     }
 
     if (action === 'save_settings') {

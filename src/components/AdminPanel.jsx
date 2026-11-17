@@ -374,6 +374,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [siteSlogan, setSiteSlogan] = useState('نیازمندی‌های فارسی‌زبانان در سراسر اسکاندیناوی');
   const [logoUrl, setLogoUrl] = useState('');
   const [faviconUrl, setFaviconUrl] = useState('');
+  const [uploadingBrandKey, setUploadingBrandKey] = useState(null);
   const [supportEmail, setSupportEmail] = useState('swedpersiska@gmail.com');
   const [supportTelegram, setSupportTelegram] = useState('@SwedPersiska');
   const [supportPhone, setSupportPhone] = useState('');
@@ -1070,6 +1071,44 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       if (onRefreshAds) onRefreshAds();
     } catch (err) {
       alert('خطا در حذف آگهی: ' + err.message);
+    }
+  };
+
+  // Upload Logo or Favicon directly to Cloudflare R2
+  const handleBrandingFileUpload = async (file, kind) => {
+    if (!file) return;
+    if (file.size > 1048576) {
+      alert('حداکثر حجم مجاز برای لوگو یا آیکون ۱ مگابایت است.');
+      return;
+    }
+    setUploadingBrandKey(kind);
+    try {
+      const res = await adminApi.request('presign_branding_upload', {
+        kind,
+        contentType: file.type || 'image/png',
+        fileSize: file.size,
+      });
+      if (!res || !res.ok || !res.uploadUrl || !res.publicUrl) {
+        throw new Error(res?.error || 'خطا در دریافت مجوز آپلود (بررسی کنید Cloudflare R2 فعال باشد).');
+      }
+      const putRes = await fetch(res.uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type || 'image/png' },
+        body: file,
+      });
+      if (!putRes.ok) {
+        throw new Error('آپلود فایل با خطا مواجه شد.');
+      }
+      if (kind === 'favicon') {
+        setFaviconUrl(res.publicUrl);
+      } else {
+        setLogoUrl(res.publicUrl);
+      }
+      triggerToast('فایل با موفقیت آپلود شد! برای ثبت نهایی «ذخیره مشخصات» را بزنید.');
+    } catch (err) {
+      alert(err.message || 'خطا در آپلود تصویر');
+    } finally {
+      setUploadingBrandKey(null);
     }
   };
 
@@ -4005,52 +4044,102 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   </div>
                 </div>
 
-                {/* Logo & Favicon URL Inputs with Live Preview */}
+                {/* Logo & Favicon Upload + URL Inputs with Live Preview */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">
-                      لینک لوگو سایت (Logo URL)
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-stone-700">
+                      لوگو سایت (آپلود مستقیم یا لینک)
                     </label>
                     <div className="flex items-center gap-2">
+                      <label className="h-10 px-3.5 rounded-xl bg-[#0066CC] hover:bg-[#0055AA] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors active:scale-95">
+                        <Plus size={14} />
+                        <span>{uploadingBrandKey === 'logo' ? 'در حال آپلود...' : 'آپلود لوگو'}</span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
+                          disabled={uploadingBrandKey !== null}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            e.target.value = '';
+                            handleBrandingFileUpload(f, 'logo');
+                          }}
+                          className="hidden"
+                        />
+                      </label>
                       <input
                         type="url"
                         value={logoUrl}
                         onChange={(e) => setLogoUrl(e.target.value)}
                         placeholder="https://.../logo.png"
-                        className="flex-1 h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs text-left"
+                        className="flex-1 min-w-0 h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs text-left"
                         dir="ltr"
                       />
                       {logoUrl && (
-                        <img
-                          src={logoUrl}
-                          alt="پیش‌نمایش لوگو"
-                          className="h-10 w-10 rounded-xl object-contain border border-stone-200 bg-stone-50 p-1 shrink-0"
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                        />
+                        <div className="relative shrink-0">
+                          <img
+                            src={logoUrl}
+                            alt="پیش‌نمایش لوگو"
+                            className="h-10 w-10 rounded-xl object-contain border border-stone-200 bg-stone-50 p-1"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setLogoUrl('')}
+                            className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-rose-600 text-white flex items-center justify-center cursor-pointer"
+                            title="حذف لوگو"
+                          >
+                            <X size={10} />
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">
-                      لینک آیکون تب مرورگر (Favicon URL)
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-stone-700">
+                      آیکون تب مرورگر / Favicon (آپلود مستقیم یا لینک)
                     </label>
                     <div className="flex items-center gap-2">
+                      <label className="h-10 px-3.5 rounded-xl bg-[#0066CC] hover:bg-[#0055AA] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors active:scale-95">
+                        <Plus size={14} />
+                        <span>{uploadingBrandKey === 'favicon' ? 'در حال آپلود...' : 'آپلود آیکون'}</span>
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon,.ico,.svg"
+                          disabled={uploadingBrandKey !== null}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            e.target.value = '';
+                            handleBrandingFileUpload(f, 'favicon');
+                          }}
+                          className="hidden"
+                        />
+                      </label>
                       <input
                         type="url"
                         value={faviconUrl}
                         onChange={(e) => setFaviconUrl(e.target.value)}
                         placeholder="https://.../favicon.png"
-                        className="flex-1 h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs text-left"
+                        className="flex-1 min-w-0 h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs text-left"
                         dir="ltr"
                       />
                       {faviconUrl && (
-                        <img
-                          src={faviconUrl}
-                          alt="پیش‌نمایش آیکون"
-                          className="h-10 w-10 rounded-xl object-contain border border-stone-200 bg-stone-50 p-1.5 shrink-0"
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                        />
+                        <div className="relative shrink-0">
+                          <img
+                            src={faviconUrl}
+                            alt="پیش‌نمایش آیکون"
+                            className="h-10 w-10 rounded-xl object-contain border border-stone-200 bg-stone-50 p-1.5"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setFaviconUrl('')}
+                            className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-rose-600 text-white flex items-center justify-center cursor-pointer"
+                            title="حذف آیکون"
+                          >
+                            <X size={10} />
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
