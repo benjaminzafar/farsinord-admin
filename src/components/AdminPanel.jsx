@@ -373,6 +373,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [siteName, setSiteName] = useState('سوئد پرشیا');
   const [siteSlogan, setSiteSlogan] = useState('نیازمندی‌های فارسی‌زبانان در سراسر اسکاندیناوی');
   const [logoUrl, setLogoUrl] = useState('');
+  const [faviconUrl, setFaviconUrl] = useState('');
   const [supportEmail, setSupportEmail] = useState('swedpersiska@gmail.com');
   const [supportTelegram, setSupportTelegram] = useState('@SwedPersiska');
   const [supportPhone, setSupportPhone] = useState('');
@@ -471,6 +472,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         setSiteName(item.value.siteName || 'سوئد پرشیا');
         setSiteSlogan(item.value.siteSlogan || '');
         setLogoUrl(item.value.logoUrl || '');
+        setFaviconUrl(item.value.faviconUrl || '');
         setSupportEmail(item.value.supportEmail || '');
         setSupportTelegram(item.value.supportTelegram || '');
         setSupportPhone(item.value.supportPhone || '');
@@ -1080,6 +1082,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         siteName: siteName.trim(),
         siteSlogan: siteSlogan.trim(),
         logoUrl: logoUrl.trim(),
+        faviconUrl: faviconUrl.trim(),
         supportEmail: supportEmail.trim(),
         supportTelegram: supportTelegram.trim(),
         supportPhone: supportPhone.trim()
@@ -3999,6 +4002,57 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       onChange={(e) => setSiteSlogan(e.target.value)}
                       className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
                     />
+                  </div>
+                </div>
+
+                {/* Logo & Favicon URL Inputs with Live Preview */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                      لینک لوگو سایت (Logo URL)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="url"
+                        value={logoUrl}
+                        onChange={(e) => setLogoUrl(e.target.value)}
+                        placeholder="https://.../logo.png"
+                        className="flex-1 h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs text-left"
+                        dir="ltr"
+                      />
+                      {logoUrl && (
+                        <img
+                          src={logoUrl}
+                          alt="پیش‌نمایش لوگو"
+                          className="h-10 w-10 rounded-xl object-contain border border-stone-200 bg-stone-50 p-1 shrink-0"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                      لینک آیکون تب مرورگر (Favicon URL)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="url"
+                        value={faviconUrl}
+                        onChange={(e) => setFaviconUrl(e.target.value)}
+                        placeholder="https://.../favicon.png"
+                        className="flex-1 h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs text-left"
+                        dir="ltr"
+                      />
+                      {faviconUrl && (
+                        <img
+                          src={faviconUrl}
+                          alt="پیش‌نمایش آیکون"
+                          className="h-10 w-10 rounded-xl object-contain border border-stone-200 bg-stone-50 p-1.5 shrink-0"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      )}
+                    </div>
                   </div>
                 </div>
 
