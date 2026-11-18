@@ -431,6 +431,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     freeBoostCooldownDays: 7,
   });
   const [hasServiceRoleConfig, setHasServiceRoleConfig] = useState(true);
+  const [serverEnvStatus, setServerEnvStatus] = useState({
+    hasServiceRole: true,
+    hasStripeSecretKey: null,
+    stripeKeyMode: 'none',
+    hasStripeWebhookSecret: null,
+  });
   const [countryStats, setCountryStats] = useState({
     se: { total: 0, active: 0, vip: 0, views: 0 },
     no: { total: 0, active: 0, vip: 0, views: 0 },
@@ -764,6 +770,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       }
       if (apiRes && apiRes.ok) {
         setHasServiceRoleConfig(apiRes.hasServiceRole !== false);
+        if (apiRes.serverEnvStatus) {
+          setServerEnvStatus(apiRes.serverEnvStatus);
+        }
         setCounts(apiRes.counts);
         setCountryStats(apiRes.countryStats);
         setCategoryCounts(apiRes.categoryCounts);
@@ -5665,27 +5674,96 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                   <div className="space-y-3 pt-1">
                     <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید عمومی درگاه پرداخت</label>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید عمومی درگاه پرداخت (Publishable Key)</label>
                       <input
                         type="text"
                         value={stripeSettings.publishableKey}
                         onChange={(e) => setStripeSettings(prev => ({ ...prev, publishableKey: e.target.value }))}
-                        placeholder="کلید عمومی آزمایشی یا عملیاتی"
+                        placeholder="pk_live_... یا pk_test_... (اختیاری برای Stripe Checkout)"
                         className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
                         dir="ltr"
                       />
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید محرمانه درگاه پرداخت</label>
-                      <input
-                        type="password"
-                        value={stripeSettings.secretKey}
-                        onChange={(e) => setStripeSettings(prev => ({ ...prev, secretKey: e.target.value }))}
-                        placeholder="کلید محرمانه آزمایشی یا عملیاتی"
-                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
-                        dir="ltr"
-                      />
+                    {/* Server Environment Security Status Card */}
+                    <div className="rounded-xl border border-stone-200/80 bg-stone-50 p-4 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck size={16} className="text-slate-800 shrink-0" />
+                          <span className="text-xs font-extrabold text-zinc-900">وضعیت امنیتی کلیدهای محرمانه در سرور</span>
+                        </div>
+                        <span className="text-[10.5px] font-bold text-stone-500">
+                          ذخیره‌سازی امن فقط در Vercel Env
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                        <div className="p-2.5 rounded-lg bg-white border border-stone-200/80 flex items-center justify-between gap-2">
+                          <span className="font-mono text-[11px] font-bold text-stone-700" dir="ltr">STRIPE_SECRET_KEY</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold border ${
+                            serverEnvStatus.hasStripeSecretKey === null
+                              ? 'bg-stone-100 text-stone-500 border-stone-200'
+                              : serverEnvStatus.hasStripeSecretKey
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-amber-50 text-amber-800 border-amber-200'
+                          }`}>
+                            {serverEnvStatus.hasStripeSecretKey === null
+                              ? 'نامشخص'
+                              : serverEnvStatus.hasStripeSecretKey
+                                ? `فعال (${serverEnvStatus.stripeKeyMode === 'live' ? 'عملیاتی' : serverEnvStatus.stripeKeyMode === 'test' ? 'آزمایشی' : 'تنظیم‌شده'})`
+                                : 'تنظیم نشده'}
+                          </span>
+                        </div>
+
+                        <div className="p-2.5 rounded-lg bg-white border border-stone-200/80 flex items-center justify-between gap-2">
+                          <span className="font-mono text-[11px] font-bold text-stone-700" dir="ltr">STRIPE_WEBHOOK_SECRET</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold border ${
+                            serverEnvStatus.hasStripeWebhookSecret === null
+                              ? 'bg-stone-100 text-stone-500 border-stone-200'
+                              : serverEnvStatus.hasStripeWebhookSecret
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-amber-50 text-amber-800 border-amber-200'
+                          }`}>
+                            {serverEnvStatus.hasStripeWebhookSecret === null
+                              ? 'نامشخص'
+                              : serverEnvStatus.hasStripeWebhookSecret
+                                ? 'امضای وب‌هوک فعال'
+                                : 'تنظیم نشده'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {serverEnvStatus.hasStripeSecretKey &&
+                        serverEnvStatus.stripeKeyMode !== 'none' &&
+                        serverEnvStatus.stripeKeyMode !== stripeSettings.mode && (
+                        <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-[11px] font-bold text-rose-800 flex items-center gap-2">
+                          <AlertCircle size={14} className="shrink-0" />
+                          <span>
+                            هشدار عدم تطابق: کلید سرور در حالت «{serverEnvStatus.stripeKeyMode === 'live' ? 'عملیاتی' : 'آزمایشی'}» است اما حالت درگاه بالا روی «{stripeSettings.mode === 'live' ? 'عملیاتی' : 'آزمایشی'}» تنظیم شده!
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="pt-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-stone-600">
+                        <span>آدرس رسمی Webhook برای ثبت در پنل Stripe:</span>
+                        <div className="flex items-center gap-1.5">
+                          <code className="px-2 py-1 rounded bg-white border border-stone-200 font-mono text-[10.5px] text-zinc-900 select-all" dir="ltr">
+                            https://www.linksho.eu/api/stripe-webhook
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => copyText('https://www.linksho.eu/api/stripe-webhook', 'stripe_webhook_url', 'آدرس وب‌هوک Stripe')}
+                            className="h-7 px-2 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 text-stone-700 flex items-center gap-1 cursor-pointer"
+                          >
+                            {copiedKey === 'stripe_webhook_url' ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                            <span>کپی</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] text-stone-500 leading-relaxed">
+                        برای امنیت حداکثری، کلید محرمانه (<code className="font-mono text-[10px]">STRIPE_SECRET_KEY</code>) و کلید وب‌هوک (<code className="font-mono text-[10px]">STRIPE_WEBHOOK_SECRET</code>) هرگز در دیتابیس ذخیره نمی‌شوند و باید فقط در تنظیمات رایگان Vercel Environment Variables ثبت گردند.
+                      </p>
                     </div>
                   </div>
                 </div>

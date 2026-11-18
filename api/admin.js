@@ -411,9 +411,23 @@ export default async function handler(req, res) {
 
       const firstPageAds = await attachAdminPins(firstPageRes.data || []);
 
+      const stripeSec = String(process.env.STRIPE_SECRET_KEY || '').trim();
+      const stripeWebhookSec = String(process.env.STRIPE_WEBHOOK_SECRET || '').trim();
+      const stripeKeyMode = /^sk_live_|^rk_live_/.test(stripeSec)
+        ? 'live'
+        : /^sk_test_|^rk_test_/.test(stripeSec)
+          ? 'test'
+          : 'none';
+
       return res.status(200).json({
         ok: true,
         hasServiceRole: HAS_SERVICE_ROLE,
+        serverEnvStatus: {
+          hasServiceRole: HAS_SERVICE_ROLE,
+          hasStripeSecretKey: Boolean(stripeSec),
+          stripeKeyMode,
+          hasStripeWebhookSecret: Boolean(stripeWebhookSec),
+        },
         counts: {
           total: totalCount,
           active: activeCount,
@@ -769,6 +783,40 @@ export default async function handler(req, res) {
         return res.status(result.status).json(result.body);
       }
       let nextValue = value;
+      if (key === 'stripe_settings') {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          return res.status(400).json({ ok: false, error: 'فرمت تنظیمات درگاه پرداخت نامعتبر است.' });
+        }
+        const modeVal = value.mode === 'live' ? 'live' : value.mode === 'test' ? 'test' : '';
+        if (!modeVal) {
+          return res.status(400).json({ ok: false, error: 'حالت درگاه پرداخت فقط می‌تواند test یا live باشد.' });
+        }
+        const vipPriceNum = Number(value.vipPrice);
+        if (!Number.isFinite(vipPriceNum) || vipPriceNum < 1 || vipPriceNum > 100000) {
+          return res.status(400).json({ ok: false, error: 'مبلغ تعرفه ویژه باید عددی معتبر بین ۱ تا ۱۰۰٬۰۰۰ باشد.' });
+        }
+        const currencyVal = String(value.currency || 'SEK').trim().toUpperCase();
+        if (!['SEK', 'NOK', 'DKK', 'EUR'].includes(currencyVal)) {
+          return res.status(400).json({ ok: false, error: 'واحد پول باید یکی از SEK، NOK، DKK یا EUR باشد.' });
+        }
+        const durationNum = Number(value.vipDurationDays);
+        if (!Number.isInteger(durationNum) || durationNum < 1 || durationNum > 365) {
+          return res.status(400).json({ ok: false, error: 'مدت اعتبار ویژه باید عدد صحیح بین ۱ تا ۳۶۵ روز باشد.' });
+        }
+        const pubKeyVal = String(value.publishableKey || '').trim();
+        if (pubKeyVal && !/^pk_(live|test)_[A-Za-z0-9]{12,}$/.test(pubKeyVal)) {
+          return res.status(400).json({ ok: false, error: 'فرمت کلید عمومی Stripe (pk_live_... یا pk_test_...) نامعتبر است.' });
+        }
+        nextValue = {
+          enabled: Boolean(value.enabled),
+          mode: modeVal,
+          publishableKey: pubKeyVal,
+          vipPrice: Math.round(vipPriceNum * 100) / 100,
+          currency: currencyVal,
+          vipDurationDays: durationNum,
+          vipBadgeText: String(value.vipBadgeText || 'ویژه (VIP)').trim().slice(0, 40) || 'ویژه (VIP)',
+        };
+      }
       if (key === 'cloudflare_deploy_settings' && value && typeof value === 'object') {
         const { data: existingCf } = await supabase
           .from('swedpersiska_settings')
