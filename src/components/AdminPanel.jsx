@@ -553,10 +553,43 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [sellerDeployments, setSellerDeployments] = useState([]);
   const [sellerSearch, setSellerSearch] = useState('');
   const [deletingDeployment, setDeletingDeployment] = useState('');
-  const [websiteFilter, setWebsiteFilter] = useState('all'); // 'all' | 'pending_setup' | 'active' | 'ended'
+  const [websiteFilter, setWebsiteFilter] = useState('all'); // 'all' | 'reminders' | 'pending_setup' | 'active' | 'ended'
   const [editingSubId, setEditingSubId] = useState('');
-  const [editSubForm, setEditSubForm] = useState({ status: 'pending_setup', websiteUrl: '', panelUrl: '', adminNotes: '' });
+  const [editSubForm, setEditSubForm] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    companyNumber: '',
+    status: 'pending_setup',
+    websiteUrl: '',
+    panelUrl: '',
+    panelUsername: '',
+    panelPassword: '',
+    domainInfo: '',
+    telegramBotInfo: '',
+    stripeInvoiceLink: '',
+    expiresAt: '',
+    adminNotes: '',
+  });
   const [savingSub, setSavingSub] = useState(false);
+  const [showAddCrmModal, setShowAddCrmModal] = useState(false);
+  const [newCrmForm, setNewCrmForm] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    companyNumber: '',
+    websiteUrl: '',
+    panelUrl: '',
+    panelUsername: '',
+    panelPassword: '',
+    domainInfo: '',
+    telegramBotInfo: '',
+    stripeInvoiceLink: '',
+    expiresAt: '',
+    adminNotes: '',
+    status: 'active',
+  });
+  const [showCrmPasswords, setShowCrmPasswords] = useState({});
 
   const [adminTurnstileToken, setAdminTurnstileToken] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
@@ -1809,9 +1842,19 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
     setEditingSubId(keyId);
     setEditSubForm({
+      name: dep.name || '',
+      phone: dep.phone || '',
+      email: dep.email || '',
+      companyNumber: dep.companyNumber || '',
       status: dep.status || 'pending_setup',
       websiteUrl: dep.websiteUrl || '',
       panelUrl: dep.panelUrl || '',
+      panelUsername: dep.panelUsername || '',
+      panelPassword: dep.panelPassword || '',
+      domainInfo: dep.domainInfo || '',
+      telegramBotInfo: dep.telegramBotInfo || '',
+      stripeInvoiceLink: dep.stripeInvoiceLink || '',
+      expiresAt: dep.expiresAt ? String(dep.expiresAt).slice(0, 10) : '',
       adminNotes: dep.adminNotes || '',
     });
   };
@@ -1822,21 +1865,107 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       const apiRes = await adminApi.request('update_website_subscription', {
         storeId: dep.storeId || '',
         workerName: dep.workerName || '',
+        name: editSubForm.name,
+        phone: editSubForm.phone,
+        email: editSubForm.email,
+        companyNumber: editSubForm.companyNumber,
         status: editSubForm.status,
         websiteUrl: editSubForm.websiteUrl,
         panelUrl: editSubForm.panelUrl,
+        panelUsername: editSubForm.panelUsername,
+        panelPassword: editSubForm.panelPassword,
+        domainInfo: editSubForm.domainInfo,
+        telegramBotInfo: editSubForm.telegramBotInfo,
+        stripeInvoiceLink: editSubForm.stripeInvoiceLink,
+        expiresAt: editSubForm.expiresAt ? new Date(editSubForm.expiresAt).toISOString() : undefined,
         adminNotes: editSubForm.adminNotes,
       });
       if (apiRes && apiRes.ok && Array.isArray(apiRes.seller_deployments)) {
         setSellerDeployments(apiRes.seller_deployments);
       }
       setEditingSubId('');
-      triggerToast(`تغییرات اشتراک «${dep.name}» ذخیره شد.`, 'success');
+      triggerToast(`پرونده CRM «${dep.name}» ذخیره شد.`, 'success');
     } catch (err) {
       triggerToast('خطا در ذخیره اشتراک: ' + err.message, 'error');
     } finally {
       setSavingSub(false);
     }
+  };
+
+  const handleCreateCrmCustomer = async (e) => {
+    e.preventDefault();
+    if (!newCrmForm.name.trim()) {
+      triggerToast('نام مشتری یا فروشگاه الزامی است.', 'error');
+      return;
+    }
+    setSavingSub(true);
+    try {
+      const apiRes = await adminApi.request('create_website_subscription', {
+        ...newCrmForm,
+        expiresAt: newCrmForm.expiresAt ? new Date(newCrmForm.expiresAt).toISOString() : undefined,
+      });
+      if (apiRes && apiRes.ok && Array.isArray(apiRes.seller_deployments)) {
+        setSellerDeployments(apiRes.seller_deployments);
+      }
+      setShowAddCrmModal(false);
+      setNewCrmForm({
+        name: '',
+        phone: '',
+        email: '',
+        companyNumber: '',
+        websiteUrl: '',
+        panelUrl: '',
+        panelUsername: '',
+        panelPassword: '',
+        domainInfo: '',
+        telegramBotInfo: '',
+        stripeInvoiceLink: '',
+        expiresAt: '',
+        adminNotes: '',
+        status: 'active',
+      });
+      triggerToast(`مشتری «${newCrmForm.name}» به CRM اضافه شد.`, 'success');
+    } catch (err) {
+      triggerToast('خطا در افزودن مشتری: ' + err.message, 'error');
+    } finally {
+      setSavingSub(false);
+    }
+  };
+
+  const handleMarkInvoiceSent = async (dep) => {
+    setSavingSub(true);
+    try {
+      const apiRes = await adminApi.request('update_website_subscription', {
+        storeId: dep.storeId || '',
+        workerName: dep.workerName || '',
+        markInvoiceSent: true,
+      });
+      if (apiRes && apiRes.ok && Array.isArray(apiRes.seller_deployments)) {
+        setSellerDeployments(apiRes.seller_deployments);
+      }
+      triggerToast(`ارسال فاکتور ۲۶۰ کرون برای «${dep.name}» ثبت شد.`, 'success');
+    } catch (err) {
+      triggerToast('خطا در ثبت ارسال فاکتور: ' + err.message, 'error');
+    } finally {
+      setSavingSub(false);
+    }
+  };
+
+  const buildInvoiceMailto = (dep) => {
+    const expDate = dep.expiresAt ? new Date(dep.expiresAt).toLocaleDateString('fa-IR') : '';
+    const subject = encodeURIComponent(`فاکتور تمدید ماهانه وب‌سایت (۲۶۰ کرون) - ${dep.name}`);
+    const payLine = dep.stripeInvoiceLink
+      ? `لینک پرداخت امن Stripe (۲۶۰ کرون):\n${dep.stripeInvoiceLink}\n\n`
+      : '';
+    const body = encodeURIComponent(
+      `سلام ${dep.name} عزیز،\n\n` +
+      `اشتراک ماهانه وب‌سایت و پنل فروش شما تا تاریخ ${expDate} معتبر است.\n` +
+      `جهت تمدید اشتراک برای ۳۰ روز آینده (مبلغ ۲۶۰ کرون)، لطفاً از طریق لینک زیر پرداخت را انجام دهید:\n\n` +
+      payLine +
+      `کد ۸ رقمی مدیریت اشتراک شما: ${dep.manageCode || '-'}\n\n` +
+      `با تشکر، تیم پشتیبانی لینک شو`
+    );
+    return `mailto:${dep.email || ''}?subject=${subject}&body=${body}`;
   };
 
   const handleQuickSubStatus = async (dep, nextStatus) => {
@@ -4159,21 +4288,41 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           )}
 
           {/* ========================================================
-              TAB: WEBSITE BUILDER SUBSCRIPTIONS (260 SEK/MONTH)
+              TAB: WEBSITE BUILDER CRM & SUBSCRIPTIONS (260 SEK/MONTH)
           ======================================================== */}
           {activeTab === 'websites' && (() => {
             const nowMs = Date.now();
+            const getDaysLeft = (dep) => {
+              const exp = dep.expiresAt
+                ? new Date(dep.expiresAt).getTime()
+                : (dep.createdAt ? new Date(dep.createdAt).getTime() + 30 * 24 * 60 * 60 * 1000 : nowMs);
+              return Math.ceil((exp - nowMs) / (24 * 60 * 60 * 1000));
+            };
+
             const pendingCount = sellerDeployments.filter((d) => d.status === 'pending_setup').length;
             const activeCount = sellerDeployments.filter((d) => {
               const exp = d.expiresAt ? new Date(d.expiresAt).getTime() : 0;
               return d.status === 'active' && exp >= nowMs;
             }).length;
+            const upcomingInvoiceList = sellerDeployments.filter((d) => {
+              if (d.status === 'cancelled') return false;
+              const dl = getDaysLeft(d);
+              return dl >= 0 && dl <= 5;
+            });
+            const overdue14List = sellerDeployments.filter((d) => {
+              if (d.status === 'cancelled') return false;
+              return getDaysLeft(d) <= -14;
+            });
+            const remindersCount = upcomingInvoiceList.length + overdue14List.length;
             const mrrSek = activeCount * 260;
 
             const filteredDeployments = sellerDeployments.filter((dep) => {
               const exp = dep.expiresAt ? new Date(dep.expiresAt).getTime() : 0;
               const isCancelled = dep.status === 'cancelled';
               const isExpired = exp > 0 && exp < nowMs;
+              const dl = getDaysLeft(dep);
+
+              if (websiteFilter === 'reminders' && !(!isCancelled && ((dl >= 0 && dl <= 5) || dl <= -14))) return false;
               if (websiteFilter === 'pending_setup' && dep.status !== 'pending_setup') return false;
               if (websiteFilter === 'active' && !(dep.status === 'active' && !isExpired)) return false;
               if (websiteFilter === 'ended' && !(isCancelled || isExpired)) return false;
@@ -4186,21 +4335,47 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 (dep.manageCode || '').toLowerCase().includes(q) ||
                 (dep.companyNumber || '').toLowerCase().includes(q) ||
                 (dep.phone || '').toLowerCase().includes(q) ||
-                (dep.email || '').toLowerCase().includes(q)
+                (dep.email || '').toLowerCase().includes(q) ||
+                (dep.domainInfo || '').toLowerCase().includes(q) ||
+                (dep.adminNotes || '').toLowerCase().includes(q)
               );
             });
 
             return (
             <div className="space-y-5 w-full py-1 animate-in fade-in duration-150 ease-out">
+              {/* Smart Billing & 14-Day Overdue Reminder Banner */}
+              {(upcomingInvoiceList.length > 0 || overdue14List.length > 0) && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 space-y-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <h4 className="text-xs font-black text-amber-950">
+                        یادآوری هوشمند فاکتور ۲۶۰ کرون و پیگیری پرداخت
+                      </h4>
+                      <p className="text-[11px] text-amber-900">
+                        {upcomingInvoiceList.length > 0 && `${upcomingInvoiceList.length} مشتری تا ۵ روز آینده منقضی می‌شوند (ارسال فاکتور Stripe ۲۶۰ کرون). `}
+                        {overdue14List.length > 0 && `• ${overdue14List.length} مشتری بیش از ۱۴ روز از پایان اشتراکشان گذشته و پرداخت نکرده‌اند!`}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setWebsiteFilter('reminders')}
+                      className="h-8 px-3.5 rounded-full bg-amber-900 text-white text-[11px] font-bold shrink-0 cursor-pointer"
+                    >
+                      مشاهده لیست پیگیری ({remindersCount})
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Summary KPIs */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <div className="rounded-2xl bg-white border border-stone-200/80 p-4">
-                  <span className="text-[11px] font-bold text-stone-500 block">کل سفارش‌ها</span>
+                  <span className="text-[11px] font-bold text-stone-500 block">کل مشتریان CRM</span>
                   <span className="text-xl font-black text-zinc-900 tabular-nums mt-1 block">{sellerDeployments.length}</span>
                 </div>
                 <div className="rounded-2xl bg-white border border-stone-200/80 p-4">
-                  <span className="text-[11px] font-bold text-amber-700 block">در انتظار ساخت (۲۴ساعته)</span>
-                  <span className="text-xl font-black text-amber-700 tabular-nums mt-1 block">{pendingCount}</span>
+                  <span className="text-[11px] font-bold text-rose-700 block">یادآوری فاکتور / معوقه ۱۴+ روز</span>
+                  <span className="text-xl font-black text-rose-700 tabular-nums mt-1 block">{remindersCount}</span>
                 </div>
                 <div className="rounded-2xl bg-white border border-stone-200/80 p-4">
                   <span className="text-[11px] font-bold text-emerald-700 block">اشتراک‌های فعال</span>
@@ -4212,33 +4387,95 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 </div>
               </div>
 
-              {/* Website Builder Subscriptions List */}
+              {/* Website Builder CRM & Subscriptions List */}
               <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-wrap">
                   <div>
                     <h3 className="text-sm font-black text-zinc-900">
-                      مدیریت اشتراک‌ها و سفارش‌های ساخت وب‌سایت ({filteredDeployments.length})
+                      CRM مشتریان، اطلاعات ورود، دامنه و فاکتور ۲۶۰ کرون ({filteredDeployments.length})
                     </h3>
                     <p className="text-xs text-stone-500 mt-0.5">
-                      کنترل وضعیت، ثبت لینک سایت و پنل فروش مشتری، تمدید ۳۰ روزه (۲۶۰ کرون) و مشاهده کد ۸ رقمی.
+                      ذخیره نام کاربری، رمز عبور، اطلاعات دامنه، یادداشت‌های مهم، لینک فاکتور Stripe و یادآوری ۱۴ روزه پس از انقضا.
                     </p>
                   </div>
-                  <div className="relative w-full sm:w-64">
-                    <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={sellerSearch}
-                      onChange={(e) => setSellerSearch(e.target.value)}
-                      placeholder="جستجوی نام، کد ۸ رقمی، شرکت، تلفن..."
-                      className="w-full h-9 rounded-xl bg-stone-50 border border-stone-200/80 pr-8 pl-3 text-xs focus:bg-white focus:border-stone-400 focus:outline-none"
-                    />
+                  <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+                    <div className="relative flex-1 sm:w-64">
+                      <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={sellerSearch}
+                        onChange={(e) => setSellerSearch(e.target.value)}
+                        placeholder="جستجو در نام، کد ۸ رقمی، دامنه، یادداشت..."
+                        className="w-full h-9 rounded-xl bg-stone-50 border border-stone-200/80 pr-8 pl-3 text-xs focus:bg-white focus:border-stone-400 focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddCrmModal((v) => !v)}
+                      className="h-9 px-3.5 rounded-xl bg-[#0066CC] hover:bg-[#0055AA] text-white text-xs font-bold shrink-0 cursor-pointer"
+                    >
+                      {showAddCrmModal ? 'بستن فرم' : '+ افزودن مشتری جدید'}
+                    </button>
                   </div>
                 </div>
+
+                {/* Manual Add Customer CRM Form */}
+                {showAddCrmModal && (
+                  <form onSubmit={handleCreateCrmCustomer} className="rounded-2xl bg-stone-50 border border-stone-200 p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-stone-700 mb-1">نام فروشگاه / مشتری *</label>
+                      <input type="text" required value={newCrmForm.name} onChange={(e) => setNewCrmForm((p) => ({ ...p, name: e.target.value }))} placeholder="مثلاً: رستوران زعفران" className="w-full h-9 rounded-lg bg-white border border-stone-200 px-2.5 text-xs" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-stone-700 mb-1">تلفن</label>
+                      <input type="text" dir="ltr" value={newCrmForm.phone} onChange={(e) => setNewCrmForm((p) => ({ ...p, phone: e.target.value }))} placeholder="+46 70..." className="w-full h-9 rounded-lg bg-white border border-stone-200 px-2.5 text-xs font-mono text-left" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-stone-700 mb-1">ایمیل</label>
+                      <input type="email" dir="ltr" value={newCrmForm.email} onChange={(e) => setNewCrmForm((p) => ({ ...p, email: e.target.value }))} placeholder="client@domain.se" className="w-full h-9 rounded-lg bg-white border border-stone-200 px-2.5 text-xs font-mono text-left" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-stone-700 mb-1">شماره ثبت شرکت (Org.nr)</label>
+                      <input type="text" dir="ltr" value={newCrmForm.companyNumber} onChange={(e) => setNewCrmForm((p) => ({ ...p, companyNumber: e.target.value }))} placeholder="559000-0000" className="w-full h-9 rounded-lg bg-white border border-stone-200 px-2.5 text-xs font-mono text-left" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-stone-700 mb-1">نام کاربری پنل مشتری</label>
+                      <input type="text" dir="ltr" value={newCrmForm.panelUsername} onChange={(e) => setNewCrmForm((p) => ({ ...p, panelUsername: e.target.value }))} placeholder="admin@..." className="w-full h-9 rounded-lg bg-white border border-stone-200 px-2.5 text-xs font-mono text-left" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-stone-700 mb-1">رمز عبور پنل مشتری</label>
+                      <input type="text" dir="ltr" value={newCrmForm.panelPassword} onChange={(e) => setNewCrmForm((p) => ({ ...p, panelPassword: e.target.value }))} placeholder="••••••••" className="w-full h-9 rounded-lg bg-white border border-stone-200 px-2.5 text-xs font-mono text-left" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-stone-700 mb-1">اطلاعات دامنه و DNS</label>
+                      <input type="text" value={newCrmForm.domainInfo} onChange={(e) => setNewCrmForm((p) => ({ ...p, domainInfo: e.target.value }))} placeholder="مثلاً: Loopia / Cloudflare DNS" className="w-full h-9 rounded-lg bg-white border border-stone-200 px-2.5 text-xs" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-stone-700 mb-1">لینک فاکتور ۲۶۰ کرون Stripe</label>
+                      <input type="url" dir="ltr" value={newCrmForm.stripeInvoiceLink} onChange={(e) => setNewCrmForm((p) => ({ ...p, stripeInvoiceLink: e.target.value }))} placeholder="https://buy.stripe.com/..." className="w-full h-9 rounded-lg bg-white border border-stone-200 px-2.5 text-xs font-mono text-left" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-stone-700 mb-1">تاریخ پایان اشتراک (اختیاری)</label>
+                      <input type="date" dir="ltr" value={newCrmForm.expiresAt} onChange={(e) => setNewCrmForm((p) => ({ ...p, expiresAt: e.target.value }))} className="w-full h-9 rounded-lg bg-white border border-stone-200 px-2.5 text-xs font-mono" />
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-3">
+                      <label className="block text-[11px] font-bold text-stone-700 mb-1">یادداشت‌های مهم CRM</label>
+                      <textarea rows={2} value={newCrmForm.adminNotes} onChange={(e) => setNewCrmForm((p) => ({ ...p, adminNotes: e.target.value }))} placeholder="اطلاعات مهم مشتری، ربات تلگرام، وضعیت دامنه..." className="w-full rounded-lg bg-white border border-stone-200 p-2.5 text-xs" />
+                    </div>
+                    <div className="sm:col-span-2 lg:col-span-3 flex justify-end gap-2">
+                      <button type="button" onClick={() => setShowAddCrmModal(false)} className="h-9 px-4 rounded-lg bg-white border border-stone-200 text-xs font-bold cursor-pointer">انصراف</button>
+                      <button type="submit" disabled={savingSub} className="h-9 px-5 rounded-lg bg-[#0066CC] text-white text-xs font-bold cursor-pointer disabled:opacity-50">
+                        {savingSub ? 'در حال ثبت...' : 'ذخیره مشتری در CRM'}
+                      </button>
+                    </div>
+                  </form>
+                )}
 
                 {/* Filter Pills */}
                 <div className="flex items-center gap-2 flex-wrap">
                   {[
                     { id: 'all', label: 'همه' },
+                    { id: 'reminders', label: `یادآوری فاکتور / معوقه (${remindersCount})` },
                     { id: 'pending_setup', label: `در انتظار ساخت (${pendingCount})` },
                     { id: 'active', label: `فعال (${activeCount})` },
                     { id: 'ended', label: 'منقضی / لغو شده' },
@@ -4273,12 +4510,17 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                         : (dep.createdAt ? new Date(dep.createdAt).getTime() + 30 * 24 * 60 * 60 * 1000 : Date.now());
                       const isExpired = expTime < Date.now();
                       const expLabel = new Date(expTime).toLocaleDateString('fa-IR');
+                      const daysLeft = getDaysLeft(dep);
+                      const isOverdue14 = !isCancelled && daysLeft <= -14;
+                      const isUpcomingInvoice = !isCancelled && daysLeft >= 0 && daysLeft <= 5;
+                      const isGracePeriod = !isCancelled && daysLeft < 0 && daysLeft > -14;
                       const isEditing = editingSubId === keyId;
+                      const showPwd = Boolean(showCrmPasswords[keyId]);
 
                       return (
-                      <div key={keyId} className="p-4 space-y-3 bg-stone-50/30">
-                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                          <div className="min-w-0 space-y-1.5">
+                      <div key={keyId} className={`p-4 space-y-3 ${isOverdue14 ? 'bg-rose-50/45' : isUpcomingInvoice ? 'bg-amber-50/40' : 'bg-stone-50/30'}`}>
+                        <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-1.5 flex-1">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-xs font-black text-zinc-900">{dep.name}</span>
                               <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-stone-200/70 text-stone-700">{dep.storeId}</span>
@@ -4295,14 +4537,29 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                   کد: {dep.manageCode}
                                 </button>
                               )}
-                              {dep.paymentStatus === 'paid' && (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-[#0066CC] border border-blue-200">
-                                  پرداخت Stripe تایید شده
+                              {isOverdue14 && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white">
+                                  هشدار ۱۴+ روز عدم پرداخت ({Math.abs(daysLeft)} روز گذشته)
                                 </span>
                               )}
-                              {dep.renewRequestedAt && (
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
-                                  درخواست تمدید مشتری
+                              {isGracePeriod && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-800 border border-orange-200">
+                                  منقضی ({Math.abs(daysLeft)} روز گذشته • مهلت ۱۴ روزه)
+                                </span>
+                              )}
+                              {isUpcomingInvoice && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                  یادآوری فاکتور ۲۶۰ کرون ({daysLeft === 0 ? 'امروز' : `${daysLeft} روز مانده`})
+                                </span>
+                              )}
+                              {dep.invoiceSentAt && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-[#0066CC] border border-blue-200">
+                                  فاکتور ارسال شد ({new Date(dep.invoiceSentAt).toLocaleDateString('fa-IR')})
+                                </span>
+                              )}
+                              {dep.paymentStatus === 'paid' && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  Stripe تایید شده
                                 </span>
                               )}
                               {isCancelled ? (
@@ -4323,7 +4580,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                 </span>
                               )}
                               {dep.companyNumber && (
-                                <span className="text-[10.5px] font-bold text-stone-600">ثبت شرکت: <span className="font-mono">{dep.companyNumber}</span></span>
+                                <span className="text-[10.5px] font-bold text-stone-600">Org.nr: <span className="font-mono">{dep.companyNumber}</span></span>
                               )}
                             </div>
 
@@ -4340,24 +4597,49 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                               )}
                               {dep.websiteUrl && (
                                 <a href={dep.websiteUrl} target="_blank" rel="noopener noreferrer" className="text-[#0066CC] hover:underline font-bold">
-                                  وب‌سایت مشتری ↗
+                                  وب‌سایت ↗
                                 </a>
                               )}
                               {dep.panelUrl && (
                                 <a href={dep.panelUrl} target="_blank" rel="noopener noreferrer" className="text-[#0066CC] hover:underline font-bold">
-                                  پنل فروش مشتری ↗
+                                  پنل فروش ↗
                                 </a>
                               )}
                             </div>
 
-                            {dep.adminNotes && (
-                              <p className="text-[11px] text-stone-600 bg-white border border-stone-200/70 rounded-lg px-2.5 py-1.5">
-                                یادداشت: {dep.adminNotes}
-                              </p>
+                            {/* Quick CRM Vault Preview */}
+                            {(dep.panelUsername || dep.panelPassword || dep.domainInfo || dep.telegramBotInfo || dep.adminNotes) && (
+                              <div className="rounded-xl bg-white border border-stone-200/80 p-2.5 text-[11px] text-stone-700 space-y-1">
+                                {(dep.panelUsername || dep.panelPassword) && (
+                                  <div className="flex items-center gap-3 flex-wrap">
+                                    {dep.panelUsername && (
+                                      <span>نام کاربری: <strong dir="ltr" className="font-mono select-all">{dep.panelUsername}</strong></span>
+                                    )}
+                                    {dep.panelPassword && (
+                                      <span className="inline-flex items-center gap-1.5">
+                                        رمز عبور:{' '}
+                                        <strong dir="ltr" className="font-mono select-all">
+                                          {showPwd ? dep.panelPassword : '••••••••'}
+                                        </strong>
+                                        <button
+                                          type="button"
+                                          onClick={() => setShowCrmPasswords((p) => ({ ...p, [keyId]: !p[keyId] }))}
+                                          className="text-[10px] font-bold text-[#0066CC] cursor-pointer"
+                                        >
+                                          {showPwd ? 'مخفی' : 'نمایش'}
+                                        </button>
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                                {dep.domainInfo && <div>دامنه و DNS: <strong>{dep.domainInfo}</strong></div>}
+                                {dep.telegramBotInfo && <div>ربات تلگرام: <strong>{dep.telegramBotInfo}</strong></div>}
+                                {dep.adminNotes && <div className="text-stone-600 whitespace-pre-line">یادداشت: {dep.adminNotes}</div>}
+                              </div>
                             )}
                           </div>
 
-                          <div className="flex items-center gap-2 flex-wrap shrink-0">
+                          <div className="flex items-center gap-1.5 flex-wrap shrink-0">
                             {isPendingSetup && (
                               <button
                                 type="button"
@@ -4365,15 +4647,24 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                 onClick={() => handleQuickSubStatus(dep, 'active')}
                                 className="h-8 px-3 rounded-lg bg-[#0066CC] hover:bg-[#0055AA] text-white text-[11px] font-bold cursor-pointer disabled:opacity-50"
                               >
-                                تکمیل و فعال‌سازی
+                                فعال‌سازی
                               </button>
+                            )}
+                            {dep.email && (
+                              <a
+                                href={buildInvoiceMailto(dep)}
+                                onClick={() => handleMarkInvoiceSent(dep)}
+                                className="h-8 px-3 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold inline-flex items-center gap-1"
+                              >
+                                <span>ارسال فاکتور ۲۶۰ کرون</span>
+                              </a>
                             )}
                             <button
                               type="button"
                               onClick={() => handleOpenEditSub(dep)}
                               className="h-8 px-3 rounded-lg bg-white hover:bg-stone-100 text-zinc-800 border border-stone-200 text-[11px] font-bold cursor-pointer"
                             >
-                              {isEditing ? 'بستن ویرایش' : 'مدیریت و لینک‌ها'}
+                              {isEditing ? 'بستن CRM' : 'پرونده CRM و رمزها'}
                             </button>
                             <button
                               type="button"
@@ -4387,17 +4678,29 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                               type="button"
                               disabled={deletingDeployment === keyId}
                               onClick={() => handleDeleteSellerDeployment(dep)}
-                              className="h-8 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                              className="h-8 px-2.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
                             >
                               <Trash2 size={13} />
-                              <span>{deletingDeployment === keyId ? 'حذف...' : 'حذف'}</span>
+                              <span>{deletingDeployment === keyId ? '...' : 'حذف'}</span>
                             </button>
                           </div>
                         </div>
 
-                        {/* Inline Admin Control Editor */}
+                        {/* Full Customer CRM Editor */}
                         {isEditing && (
-                          <div className="pt-3 border-t border-stone-200/80 grid grid-cols-1 sm:grid-cols-2 gap-3 bg-white p-3.5 rounded-xl border">
+                          <div className="pt-3 border-t border-stone-200/80 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 bg-white p-4 rounded-xl border">
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">نام فروشگاه / مشتری</label>
+                              <input type="text" value={editSubForm.name} onChange={(e) => setEditSubForm((p) => ({ ...p, name: e.target.value }))} className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs" />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">تلفن</label>
+                              <input type="text" dir="ltr" value={editSubForm.phone} onChange={(e) => setEditSubForm((p) => ({ ...p, phone: e.target.value }))} className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono text-left" />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">ایمیل</label>
+                              <input type="email" dir="ltr" value={editSubForm.email} onChange={(e) => setEditSubForm((p) => ({ ...p, email: e.target.value }))} className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono text-left" />
+                            </div>
                             <div>
                               <label className="block text-[11px] font-bold text-stone-700 mb-1">وضعیت اشتراک</label>
                               <select
@@ -4411,38 +4714,52 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                               </select>
                             </div>
                             <div>
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">تاریخ پایان اشتراک</label>
+                              <input type="date" dir="ltr" value={editSubForm.expiresAt} onChange={(e) => setEditSubForm((p) => ({ ...p, expiresAt: e.target.value }))} className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono" />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">شماره ثبت شرکت (Org.nr)</label>
+                              <input type="text" dir="ltr" value={editSubForm.companyNumber} onChange={(e) => setEditSubForm((p) => ({ ...p, companyNumber: e.target.value }))} className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono text-left" />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">نام کاربری پنل مشتری</label>
+                              <input type="text" dir="ltr" value={editSubForm.panelUsername} onChange={(e) => setEditSubForm((p) => ({ ...p, panelUsername: e.target.value }))} placeholder="admin@..." className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono text-left" />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">رمز عبور پنل مشتری</label>
+                              <input type="text" dir="ltr" value={editSubForm.panelPassword} onChange={(e) => setEditSubForm((p) => ({ ...p, panelPassword: e.target.value }))} placeholder="رمز عبور" className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono text-left" />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">لینک فاکتور ۲۶۰ کرون Stripe</label>
+                              <input type="url" dir="ltr" value={editSubForm.stripeInvoiceLink} onChange={(e) => setEditSubForm((p) => ({ ...p, stripeInvoiceLink: e.target.value }))} placeholder="https://buy.stripe.com/..." className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono text-left" />
+                            </div>
+                            <div>
                               <label className="block text-[11px] font-bold text-stone-700 mb-1">لینک وب‌سایت مشتری</label>
-                              <input
-                                type="url"
-                                dir="ltr"
-                                value={editSubForm.websiteUrl}
-                                onChange={(e) => setEditSubForm((p) => ({ ...p, websiteUrl: e.target.value }))}
-                                placeholder="https://example.se"
-                                className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono text-left"
-                              />
+                              <input type="url" dir="ltr" value={editSubForm.websiteUrl} onChange={(e) => setEditSubForm((p) => ({ ...p, websiteUrl: e.target.value }))} placeholder="https://example.se" className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono text-left" />
                             </div>
                             <div>
                               <label className="block text-[11px] font-bold text-stone-700 mb-1">لینک پنل فروش مشتری</label>
-                              <input
-                                type="url"
-                                dir="ltr"
-                                value={editSubForm.panelUrl}
-                                onChange={(e) => setEditSubForm((p) => ({ ...p, panelUrl: e.target.value }))}
-                                placeholder="https://panel.example.se"
-                                className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono text-left"
-                              />
+                              <input type="url" dir="ltr" value={editSubForm.panelUrl} onChange={(e) => setEditSubForm((p) => ({ ...p, panelUrl: e.target.value }))} placeholder="https://panel.example.se" className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono text-left" />
                             </div>
                             <div>
-                              <label className="block text-[11px] font-bold text-stone-700 mb-1">یادداشت ادمین (ربات تلگرام، دامنه، فاکتور)</label>
-                              <input
-                                type="text"
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">ربات تلگرام</label>
+                              <input type="text" value={editSubForm.telegramBotInfo} onChange={(e) => setEditSubForm((p) => ({ ...p, telegramBotInfo: e.target.value }))} placeholder="@MyShopOrderBot" className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs" />
+                            </div>
+                            <div className="sm:col-span-2 lg:col-span-3">
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">اطلاعات دامنه و DNS</label>
+                              <input type="text" value={editSubForm.domainInfo} onChange={(e) => setEditSubForm((p) => ({ ...p, domainInfo: e.target.value }))} placeholder="مثلاً: ثبت شده در Loopia، رکوردهای DNS روی کلود ست شده" className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs" />
+                            </div>
+                            <div className="sm:col-span-2 lg:col-span-3">
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">یادداشت‌های مهم CRM (فقط برای شما قابل مشاهده است)</label>
+                              <textarea
+                                rows={3}
                                 value={editSubForm.adminNotes}
                                 onChange={(e) => setEditSubForm((p) => ({ ...p, adminNotes: e.target.value }))}
-                                placeholder="مثلاً: دامنه وصل شد، ربات تلگرام فعال"
-                                className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs"
+                                placeholder="رمزها، نکات فنی، توافقات و یادداشت‌های پیگیری..."
+                                className="w-full rounded-lg bg-stone-50 border border-stone-200 p-2.5 text-xs"
                               />
                             </div>
-                            <div className="sm:col-span-2 flex justify-end gap-2 pt-1">
+                            <div className="sm:col-span-2 lg:col-span-3 flex justify-end gap-2 pt-1">
                               <button
                                 type="button"
                                 onClick={() => setEditingSubId('')}
@@ -4456,7 +4773,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                 onClick={() => handleSaveEditSub(dep)}
                                 className="h-9 px-5 rounded-lg bg-[#0066CC] hover:bg-[#0055AA] text-white text-xs font-bold cursor-pointer disabled:opacity-50"
                               >
-                                {savingSub ? 'در حال ذخیره...' : 'ذخیره تغییرات'}
+                                {savingSub ? 'در حال ذخیره...' : 'ذخیره پرونده CRM'}
                               </button>
                             </div>
                           </div>

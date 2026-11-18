@@ -593,6 +593,80 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, seller_deployments: nextList });
     }
 
+    if (action === 'create_website_subscription') {
+      const name = String(body.name || '').trim().slice(0, 120);
+      if (name.length < 2) {
+        return res.status(400).json({ ok: false, error: 'نام مشتری یا فروشگاه الزامی است.' });
+      }
+
+      const sanitizeUrl = (val) => {
+        const s = String(val || '').trim().slice(0, 400);
+        if (!s) return '';
+        try {
+          const u = new URL(s.startsWith('http') ? s : `https://${s}`);
+          if (u.protocol === 'https:' || u.protocol === 'http:') return u.toString();
+        } catch {}
+        return '';
+      };
+
+      const { data: depRow } = await supabase
+        .from('swedpersiska_settings')
+        .select('value')
+        .eq('key', 'seller_deployments')
+        .maybeSingle();
+      const prevList = Array.isArray(depRow?.value) ? depRow.value : [];
+      const usedCodes = new Set(prevList.map((x) => String(x?.manageCode || '')));
+      let manageCode = String(crypto.randomInt(10000000, 100000000));
+      for (let i = 0; i < 20 && usedCodes.has(manageCode); i++) {
+        manageCode = String(crypto.randomInt(10000000, 100000000));
+      }
+
+      const orderId = `WEB-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+      const createdAt = new Date().toISOString();
+      let expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      if (body.expiresAt) {
+        const parsedExp = new Date(body.expiresAt);
+        if (!Number.isNaN(parsedExp.getTime())) expiresAt = parsedExp.toISOString();
+      }
+
+      const newSub = {
+        storeId: orderId,
+        manageCode,
+        workerName: `sub_${orderId.toLowerCase()}`,
+        dbId: '',
+        name,
+        phone: String(body.phone || '').trim().slice(0, 40),
+        companyNumber: String(body.companyNumber || '').trim().slice(0, 60),
+        email: String(body.email || '').trim().slice(0, 120),
+        websiteUrl: sanitizeUrl(body.websiteUrl),
+        panelUrl: sanitizeUrl(body.panelUrl),
+        storefrontApiUrl: '',
+        panelUsername: String(body.panelUsername || '').trim().slice(0, 120),
+        panelPassword: String(body.panelPassword || '').trim().slice(0, 120),
+        domainInfo: String(body.domainInfo || '').trim().slice(0, 500),
+        telegramBotInfo: String(body.telegramBotInfo || '').trim().slice(0, 300),
+        stripeInvoiceLink: sanitizeUrl(body.stripeInvoiceLink),
+        adminNotes: String(body.adminNotes || '').trim().slice(0, 1500),
+        invoiceSentAt: '',
+        status: ['pending_setup', 'active', 'cancelled'].includes(body.status) ? body.status : 'active',
+        paymentStatus: 'manual_crm',
+        setupPrice: 1500,
+        monthlyPrice: 260,
+        expiresAt,
+        createdAt,
+        updatedAt: createdAt,
+      };
+
+      const nextList = [newSub, ...prevList].slice(0, 500);
+      await supabase.from('swedpersiska_settings').upsert({
+        key: 'seller_deployments',
+        value: nextList,
+        updated_at: createdAt,
+      });
+
+      return res.status(200).json({ ok: true, seller_deployments: nextList, subscription: newSub });
+    }
+
     if (action === 'update_website_subscription') {
       const storeId = String(body.storeId || '').trim();
       const workerName = String(body.workerName || '').trim();
@@ -621,7 +695,7 @@ export default async function handler(req, res) {
       }
 
       const sanitizeUrl = (val) => {
-        const s = String(val || '').trim().slice(0, 300);
+        const s = String(val || '').trim().slice(0, 400);
         if (!s) return '';
         try {
           const u = new URL(s.startsWith('http') ? s : `https://${s}`);
@@ -630,9 +704,24 @@ export default async function handler(req, res) {
         return '';
       };
 
+      if (body.name !== undefined && String(body.name).trim()) next.name = String(body.name).trim().slice(0, 120);
+      if (body.phone !== undefined) next.phone = String(body.phone || '').trim().slice(0, 40);
+      if (body.companyNumber !== undefined) next.companyNumber = String(body.companyNumber || '').trim().slice(0, 60);
+      if (body.email !== undefined) next.email = String(body.email || '').trim().slice(0, 120);
       if (body.websiteUrl !== undefined) next.websiteUrl = sanitizeUrl(body.websiteUrl);
       if (body.panelUrl !== undefined) next.panelUrl = sanitizeUrl(body.panelUrl);
-      if (body.adminNotes !== undefined) next.adminNotes = String(body.adminNotes || '').trim().slice(0, 500);
+      if (body.panelUsername !== undefined) next.panelUsername = String(body.panelUsername || '').trim().slice(0, 120);
+      if (body.panelPassword !== undefined) next.panelPassword = String(body.panelPassword || '').trim().slice(0, 120);
+      if (body.domainInfo !== undefined) next.domainInfo = String(body.domainInfo || '').trim().slice(0, 500);
+      if (body.telegramBotInfo !== undefined) next.telegramBotInfo = String(body.telegramBotInfo || '').trim().slice(0, 300);
+      if (body.stripeInvoiceLink !== undefined) next.stripeInvoiceLink = sanitizeUrl(body.stripeInvoiceLink);
+      if (body.adminNotes !== undefined) next.adminNotes = String(body.adminNotes || '').trim().slice(0, 1500);
+      if (body.markInvoiceSent) next.invoiceSentAt = new Date().toISOString();
+
+      if (body.expiresAt !== undefined && body.expiresAt) {
+        const parsedExp = new Date(body.expiresAt);
+        if (!Number.isNaN(parsedExp.getTime())) next.expiresAt = parsedExp.toISOString();
+      }
 
       const extendDays = Number(body.extendDays || 0);
       if (extendDays > 0 && extendDays <= 365) {
@@ -641,6 +730,7 @@ export default async function handler(req, res) {
           : Date.now();
         next.expiresAt = new Date(baseTime + extendDays * 24 * 60 * 60 * 1000).toISOString();
         next.renewRequestedAt = '';
+        next.invoiceSentAt = '';
         if (next.status === 'cancelled') next.status = 'active';
       }
 
