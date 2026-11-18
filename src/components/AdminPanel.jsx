@@ -52,6 +52,7 @@ import {
   Hammer,
   Dumbbell
 } from 'lucide-react';
+import CloudflareTurnstile from './CloudflareTurnstile';
 import { supabase } from '../lib/supabase';
 import { adminApi, getMainSiteUrl } from '../lib/apiClient';
 import { CATEGORIES, COUNTRIES, mergePortalCountries } from '../lib/translations';
@@ -404,6 +405,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     fi: { total: 0, active: 0, vip: 0, views: 0 }
   });
   const [categoryCounts, setCategoryCounts] = useState({});
+  const [monthBuckets, setMonthBuckets] = useState({});
+  const [revenueChartView, setRevenueChartView] = useState('monthly'); // 'monthly' | 'country'
+  const [activeChartIdx, setActiveChartIdx] = useState(null);
   const [recentActiveAds, setRecentActiveAds] = useState([]);
 
   // Active Ads Tab State (10 records page size, database-paginated)
@@ -654,6 +658,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         setCounts(apiRes.counts);
         setCountryStats(apiRes.countryStats);
         setCategoryCounts(apiRes.categoryCounts);
+        if (apiRes.monthBuckets) setMonthBuckets(apiRes.monthBuckets);
         setRecentActiveAds(apiRes.recentActiveAds || []);
         applySettingsItems(apiRes.settings);
         if (isDefaultAdsView && Array.isArray(apiRes.initialActiveAds)) {
@@ -676,7 +681,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           .order('created_at', { ascending: false })
           .order('id', { ascending: false })
           .range(0, PAGE_SIZE - 1),
-        supabase.from('swedpersiska_ads').select('category, country, status, is_featured, views_count'),
+        supabase.from('swedpersiska_ads').select('category, country, status, is_featured, views_count, created_at'),
         supabase.from('swedpersiska_settings').select('*')
       ]);
 
@@ -692,6 +697,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         fr: { total: 0, active: 0, vip: 0, views: 0 }
       };
       const catCounts = {};
+      const mBuckets = {};
       let tot = 0;
       let act = 0;
       let pend = 0;
@@ -719,6 +725,14 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         if (row.category) {
           catCounts[row.category] = (catCounts[row.category] || 0) + 1;
         }
+        if (row.created_at) {
+          const ym = String(row.created_at).slice(0, 7);
+          if (/^\d{4}-\d{2}$/.test(ym)) {
+            if (!mBuckets[ym]) mBuckets[ym] = { total: 0, vip: 0 };
+            mBuckets[ym].total++;
+            if (row.is_featured) mBuckets[ym].vip++;
+          }
+        }
       });
 
       const firstPageAds = firstPageRes.data || [];
@@ -732,6 +746,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       });
       setCountryStats(cStats);
       setCategoryCounts(catCounts);
+      setMonthBuckets(mBuckets);
       setRecentActiveAds(firstPageAds.slice(0, 5));
       applySettingsItems(settingsRes.data);
 
@@ -1789,6 +1804,54 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
   const notifCount = (counts.pending || 0) + adReports.length;
 
+  // Compute lightweight Revenue & VIP Chart Series (6-month & per-country, zero external chart lib)
+  const revenueChartData = useMemo(() => {
+    const unitPrice = Number(stripeSettings.vipPrice) || 99;
+    const currency = stripeSettings.currency || 'SEK';
+
+    // Build last 6 calendar months
+    const now = new Date();
+    const monthlySeries = [];
+    const monthFormatter = new Intl.DateTimeFormat('fa-IR', { month: 'short' });
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const bucket = monthBuckets[ym] || { total: 0, vip: 0 };
+      monthlySeries.push({
+        key: ym,
+        label: monthFormatter.format(d),
+        totalAds: bucket.total || 0,
+        vipAds: bucket.vip || 0,
+        revenue: (bucket.vip || 0) * unitPrice,
+      });
+    }
+
+    const countrySeries = countriesList.map((c) => {
+      const st = countryStats[c.id] || { total: 0, active: 0, vip: 0, views: 0 };
+      return {
+        key: c.id,
+        label: c.nameFa,
+        totalAds: st.active || 0,
+        vipAds: st.vip || 0,
+        revenue: (st.vip || 0) * unitPrice,
+      };
+    });
+
+    const series = revenueChartView === 'country' ? countrySeries : monthlySeries;
+    const maxRevenue = Math.max(unitPrice, ...series.map((s) => s.revenue));
+    const maxTotalAds = Math.max(1, ...series.map((s) => s.totalAds));
+    const totalVipRevenue = (counts.vip || 0) * unitPrice;
+
+    return {
+      unitPrice,
+      currency,
+      series,
+      maxRevenue,
+      maxTotalAds,
+      totalVipRevenue,
+    };
+  }, [stripeSettings.vipPrice, stripeSettings.currency, monthBuckets, countriesList, countryStats, revenueChartView, counts.vip]);
+
   // ========================================================
   // LOGIN SCREEN - Apple Eye-Comfort Soft-White Focus Card
   // ========================================================
@@ -1896,7 +1959,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   // ========================================================
   return (
     <main 
-      className="admin-scope h-screen w-full overflow-hidden bg-[#f4f1ea] text-zinc-900 font-vazir select-none flex flex-col lg:flex-row p-0 lg:p-4 lg:gap-4" 
+      className="admin-scope h-[100dvh] w-full overflow-hidden bg-[#f4f1ea] text-zinc-900 font-vazir select-none flex flex-col lg:flex-row p-0 lg:p-4 lg:gap-4" 
       dir="rtl"
       data-testid="admin-page"
     >
@@ -2070,7 +2133,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         />
 
         <div
-          className={`relative z-10 w-68 max-w-[82vw] h-full bg-[#11141a] text-white flex flex-col border-s border-stone-800/80 shadow-xl transform transition-transform duration-200 will-change-transform ${
+          className={`relative z-10 w-72 max-w-[84vw] h-full bg-[#11141a] text-white flex flex-col border-s border-stone-800/80 shadow-xl transform transition-transform duration-200 will-change-transform ${
             mobileSidebarOpen ? 'translate-x-0' : 'translate-x-full'
           }`}
         >
@@ -2102,24 +2165,30 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               {
                 id: 'active-ads',
                 label: 'آگهی‌های فعال',
+                badge: counts.active || 0,
                 active: activeTab === 'ads' && adStatusFilter === 'active' && !vipOnlyFilter,
                 onClick: () => openAdsPreset('active', false),
               },
               {
                 id: 'pending-ads',
                 label: 'در انتظار تایید',
+                badge: counts.pending || 0,
+                badgeAlert: (counts.pending || 0) > 0,
                 active: activeTab === 'ads' && adStatusFilter === 'pending' && !vipOnlyFilter,
                 onClick: () => openAdsPreset('pending', false),
               },
               {
                 id: 'vip-ads',
                 label: 'آگهی‌های ویژه (VIP)',
+                badge: counts.vip || 0,
                 active: activeTab === 'ads' && vipOnlyFilter,
                 onClick: () => openAdsPreset('active', true),
               },
               {
                 id: 'reports',
                 label: 'گزارش‌های تخلف',
+                badge: adReports.length,
+                badgeAlert: adReports.length > 0,
                 active: activeTab === 'reports',
                 onClick: () => handleTabChange('reports'),
               },
@@ -2140,13 +2209,26 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 key={item.id}
                 type="button"
                 onClick={item.onClick}
-                className={`flex w-full items-center rounded-xl px-3.5 py-2.5 text-[13px] transition-colors cursor-pointer ${
+                className={`flex w-full items-center justify-between rounded-xl px-3.5 py-2.5 text-[13px] transition-colors cursor-pointer ${
                   item.active
                     ? 'bg-white text-slate-950 font-bold'
                     : 'text-stone-300 hover:bg-white/10 hover:text-white font-medium'
                 }`}
               >
                 <span>{item.label}</span>
+                {typeof item.badge === 'number' && (
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[11px] font-bold tabular-nums ${
+                      item.badgeAlert
+                        ? 'bg-rose-500 text-white'
+                        : item.active
+                        ? 'bg-slate-900/10 text-slate-900'
+                        : 'bg-white/10 text-stone-300'
+                    }`}
+                  >
+                    {item.badge}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -2173,10 +2255,75 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         </div>
       </div>
 
+      {/* Mobile Header (Fixed top bar outside scroll container — crisp full-width, zero sticky bugs) */}
+      <header className="lg:hidden shrink-0 flex items-center justify-between h-14 w-full px-3 bg-white border-b border-stone-200/80 select-none z-30 gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <button
+            type="button"
+            onClick={() => setMobileSidebarOpen(true)}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-800 hover:bg-stone-100 active:scale-95 transition-transform cursor-pointer"
+            title="باز کردن منو"
+            aria-label="باز کردن منو"
+          >
+            <Menu size={18} />
+          </button>
+          <div className="flex flex-col min-w-0">
+            <span className="font-black text-[13.5px] text-stone-900 truncate leading-tight">
+              {activeTab === 'overview' && 'داشبورد مدیریت'}
+              {activeTab === 'ads' && (vipOnlyFilter ? 'آگهی‌های ویژه' : adStatusFilter === 'pending' ? 'در انتظار تایید' : 'مدیریت آگهی‌ها')}
+              {activeTab === 'reports' && 'گزارش‌های تخلف'}
+              {activeTab === 'categories' && 'دسته‌بندی و شهرها'}
+              {activeTab === 'settings' && 'تنظیمات سایت'}
+            </span>
+            <span className="text-[10px] text-stone-400 font-medium truncate leading-tight">پنل ادمین لینک شو</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              if ((counts.pending || 0) > 0) {
+                openAdsPreset('pending', false);
+              } else if (adReports.length > 0) {
+                handleTabChange('reports');
+              } else {
+                openAdsPreset('pending', false);
+              }
+            }}
+            className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-700 hover:bg-stone-50 cursor-pointer"
+            title="اعلان‌های مدیریت"
+          >
+            <Bell size={16} />
+            {notifCount > 0 && (
+              <span className="absolute -top-1 -left-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-600 px-1 text-[9.5px] font-bold text-white ring-2 ring-white tabular-nums">
+                {notifCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={fetchAdminData}
+            className="flex h-9 w-9 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-700 hover:bg-stone-50 cursor-pointer"
+            title="بروزرسانی"
+          >
+            <RefreshCw size={15} className={loading ? 'animate-spin text-blue-600' : ''} />
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-9 px-2.5 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+          >
+            <ExternalLink size={13} />
+            <span>سایت</span>
+          </button>
+        </div>
+      </header>
+
       {/* ========================================================
           2. MAIN SCROLLABLE CONTENT AREA (INDEPENDENT FROM SIDEBAR)
       ======================================================== */}
-      <div ref={mainScrollRef} className="flex-1 w-full h-full overflow-y-auto overflow-x-hidden no-scrollbar flex flex-col min-w-0 px-2.5 pb-8 sm:px-4 lg:px-0 lg:pb-8">
+      <div ref={mainScrollRef} className="flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden no-scrollbar flex flex-col min-w-0 px-3 pt-3 pb-8 sm:px-4 lg:px-0 lg:pt-0 lg:pb-8">
         
         {/* Top Desktop Nav Bar (Solid crisp white — zero GPU blur lag) */}
         <header className="hidden lg:flex items-center justify-between h-14 px-4 bg-white rounded-2xl border border-stone-200/90 mb-4 sticky top-0 shrink-0 z-20 select-none gap-4">
@@ -2292,68 +2439,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           </div>
         </header>
 
-        {/* Mobile Header (Solid crisp white — zero GPU blur lag) */}
-        <header className="sticky top-0 z-30 flex flex-col w-full border-b border-stone-200/80 bg-white lg:hidden select-none mb-3">
-          <div className="flex h-13 w-full items-center justify-between px-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <button
-                onClick={() => setMobileSidebarOpen(true)}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-800 hover:bg-stone-100 cursor-pointer"
-                title="باز کردن منو"
-              >
-                <Menu size={18} />
-              </button>
-              <span className="font-bold text-[14px] text-stone-900 truncate">
-                {activeTab === 'overview' && 'داشبورد'}
-                {activeTab === 'ads' && 'آگهی‌ها'}
-                {activeTab === 'reports' && 'گزارش‌های تخلف'}
-                {activeTab === 'categories' && 'دسته‌بندی و شهرها'}
-                {activeTab === 'settings' && 'تنظیمات سایت'}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  if ((counts.pending || 0) > 0) {
-                    openAdsPreset('pending', false);
-                  } else if (adReports.length > 0) {
-                    handleTabChange('reports');
-                  } else {
-                    openAdsPreset('pending', false);
-                  }
-                }}
-                className="relative flex h-8.5 w-8.5 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-700 cursor-pointer"
-                title="اعلان‌های مدیریت"
-              >
-                <Bell size={15} />
-                {notifCount > 0 && (
-                  <span className="absolute -top-1 -left-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-600 px-1 text-[9.5px] font-bold text-white ring-2 ring-white tabular-nums">
-                    {notifCount}
-                  </span>
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={fetchAdminData}
-                className="flex h-8.5 w-8.5 items-center justify-center rounded-xl border border-stone-200 bg-white text-stone-700"
-                title="بروزرسانی"
-              >
-                <RefreshCw size={14} className={loading ? 'animate-spin text-blue-600' : ''} />
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="h-8.5 px-2.5 rounded-xl bg-slate-900 text-white text-xs font-bold flex items-center gap-1"
-              >
-                <ExternalLink size={12} />
-                <span>سایت</span>
-              </button>
-            </div>
-          </div>
-        </header>
-
         {/* ========================================================
             3. CONTENT CANVAS (Persian RTL)
         ======================================================== */}
@@ -2422,6 +2507,162 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     <AlertCircle size={18} />
                   </div>
                 </button>
+              </div>
+
+              {/* 1.5. REVENUE & VIP TREND CHART (Zero-dependency, Fast & Interactive) */}
+              <div className="rounded-2xl border border-stone-200/80 bg-white p-4 sm:p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-xs sm:text-sm font-black text-zinc-900">چارت درآمد و آگهی‌های ویژه (VIP)</h3>
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80 text-[10.5px] font-bold tabular-nums">
+                        {vipAds} ویژه × {revenueChartData.unitPrice} {revenueChartData.currency}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2 mt-1">
+                      <span className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums" dir="ltr">
+                        {revenueChartData.totalVipRevenue.toLocaleString('en-US')} {revenueChartData.currency}
+                      </span>
+                      <span className="text-[11px] text-stone-400">درآمد تخمینی از آگهی‌های ویژه</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+                    <div className="inline-flex items-center rounded-xl bg-stone-100 p-1 border border-stone-200/80">
+                      <button
+                        type="button"
+                        onClick={() => { setRevenueChartView('monthly'); setActiveChartIdx(null); }}
+                        className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                          revenueChartView === 'monthly'
+                            ? 'bg-white text-zinc-900 shadow-sm'
+                            : 'text-stone-500 hover:text-zinc-900'
+                        }`}
+                      >
+                        روند ۶ ماهه
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setRevenueChartView('country'); setActiveChartIdx(null); }}
+                        className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                          revenueChartView === 'country'
+                            ? 'bg-white text-zinc-900 shadow-sm'
+                            : 'text-stone-500 hover:text-zinc-900'
+                        }`}
+                      >
+                        تفکیک کشورها
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleTabChange('monetization')}
+                      className="h-8 px-2.5 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-[11px] font-bold text-stone-700 cursor-pointer"
+                    >
+                      تنظیم تعرفه
+                    </button>
+                  </div>
+                </div>
+
+                {/* Selected / Hovered Bar Detail Strip */}
+                {(() => {
+                  const selectedBar =
+                    activeChartIdx !== null && revenueChartData.series[activeChartIdx]
+                      ? revenueChartData.series[activeChartIdx]
+                      : revenueChartData.series[revenueChartData.series.length - 1];
+                  if (!selectedBar) return null;
+                  return (
+                    <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-stone-50 border border-stone-200/70 text-[11px]">
+                      <div className="flex items-center gap-2 font-bold text-zinc-800">
+                        <span className="h-2 w-2 rounded-full bg-[#0066CC]" />
+                        <span>{selectedBar.label}</span>
+                      </div>
+                      <div className="flex items-center gap-3 tabular-nums">
+                        <span className="text-stone-500">
+                          کل آگهی: <strong className="text-zinc-900">{selectedBar.totalAds}</strong>
+                        </span>
+                        <span className="text-amber-700">
+                          ویژه: <strong>{selectedBar.vipAds}</strong>
+                        </span>
+                        <span className="font-black text-emerald-700" dir="ltr">
+                          {selectedBar.revenue.toLocaleString('en-US')} {revenueChartData.currency}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Lightweight Responsive Column Chart */}
+                <div className="relative pt-2">
+                  {/* Subtle horizontal guide lines */}
+                  <div className="pointer-events-none absolute inset-x-0 top-2 bottom-7 flex flex-col justify-between">
+                    <div className="border-b border-dashed border-stone-200/70 w-full" />
+                    <div className="border-b border-dashed border-stone-200/70 w-full" />
+                    <div className="border-b border-stone-200 w-full" />
+                  </div>
+
+                  <div
+                    className={`relative z-10 grid gap-1.5 sm:gap-3 items-end h-40 sm:h-44 ${
+                      revenueChartView === 'country' ? 'grid-cols-8' : 'grid-cols-6'
+                    }`}
+                  >
+                    {revenueChartData.series.map((item, idx) => {
+                      const revPct = item.revenue > 0 ? Math.max(10, Math.round((item.revenue / revenueChartData.maxRevenue) * 100)) : 0;
+                      const adsPct = item.totalAds > 0 ? Math.max(8, Math.round((item.totalAds / revenueChartData.maxTotalAds) * 100)) : 4;
+                      const isActive = activeChartIdx === idx;
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onMouseEnter={() => setActiveChartIdx(idx)}
+                          onClick={() => setActiveChartIdx(idx)}
+                          className="group flex flex-col items-center justify-end h-full gap-1.5 cursor-pointer focus:outline-none min-w-0"
+                        >
+                          <span className="text-[9.5px] sm:text-[10px] font-bold text-stone-500 tabular-nums h-4 leading-4 truncate max-w-full">
+                            {item.revenue > 0 ? `${item.revenue}` : item.totalAds > 0 ? `${item.totalAds}` : '۰'}
+                          </span>
+                          <div className="relative w-full max-w-[38px] flex-1 flex items-end justify-center gap-0.5 sm:gap-1">
+                            {/* Total ads subtle bar */}
+                            <div
+                              style={{ height: `${adsPct}%` }}
+                              className="w-2 sm:w-3 rounded-t-md bg-stone-200/80 group-hover:bg-stone-300 transition-all duration-200"
+                              title={`کل آگهی‌ها: ${item.totalAds}`}
+                            />
+                            {/* VIP Revenue primary bar */}
+                            <div
+                              style={{ height: `${revPct || 4}%` }}
+                              className={`w-3 sm:w-4 rounded-t-lg transition-all duration-200 ${
+                                item.revenue > 0
+                                  ? isActive
+                                    ? 'bg-[#0055AA] shadow-sm'
+                                    : 'bg-gradient-to-t from-[#0066CC] to-[#38bdf8] group-hover:from-[#0055AA] group-hover:to-[#0ea5e9]'
+                                  : 'bg-stone-100'
+                              }`}
+                              title={`درآمد VIP: ${item.revenue} ${revenueChartData.currency}`}
+                            />
+                          </div>
+                          <span
+                            className={`text-[10.5px] font-bold truncate max-w-full ${
+                              isActive ? 'text-[#0066CC]' : 'text-stone-600'
+                            }`}
+                          >
+                            {item.label}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Legend */}
+                  <div className="flex items-center justify-end gap-4 mt-2 text-[10.5px] text-stone-500">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-sm bg-[#0066CC]" />
+                      <span>درآمد آگهی‌های ویژه ({revenueChartData.currency})</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-sm bg-stone-300" />
+                      <span>تعداد کل آگهی‌ها</span>
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {/* 2. ROW 2: Compact 8-Country Breakdown */}

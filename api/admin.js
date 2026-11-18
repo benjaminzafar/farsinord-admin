@@ -165,7 +165,7 @@ export default async function handler(req, res) {
           .order('created_at', { ascending: false })
           .order('id', { ascending: false })
           .range(0, PAGE_SIZE - 1),
-        supabase.from('swedpersiska_ads').select('category, country, status, is_featured, views_count'),
+        supabase.from('swedpersiska_ads').select('category, country, status, is_featured, views_count, created_at'),
         supabase.from('swedpersiska_settings').select('*')
       ]);
 
@@ -180,6 +180,7 @@ export default async function handler(req, res) {
         fr: { total: 0, active: 0, vip: 0, views: 0 }
       };
       const categoryCounts = {};
+      const monthBuckets = {};
       let totalCount = 0;
       let activeCount = 0;
       let pendingCount = 0;
@@ -206,6 +207,14 @@ export default async function handler(req, res) {
         if (row.category) {
           categoryCounts[row.category] = (categoryCounts[row.category] || 0) + 1;
         }
+        if (row.created_at) {
+          const ym = String(row.created_at).slice(0, 7);
+          if (/^\d{4}-\d{2}$/.test(ym)) {
+            if (!monthBuckets[ym]) monthBuckets[ym] = { total: 0, vip: 0 };
+            monthBuckets[ym].total++;
+            if (row.is_featured) monthBuckets[ym].vip++;
+          }
+        }
       });
 
       const firstPageAds = firstPageRes.data || [];
@@ -221,6 +230,7 @@ export default async function handler(req, res) {
         },
         countryStats,
         categoryCounts,
+        monthBuckets,
         recentActiveAds: firstPageAds.slice(0, 5),
         initialActiveAds: firstPageAds,
         settings: (settingsRes.data || []).map((item) => {
