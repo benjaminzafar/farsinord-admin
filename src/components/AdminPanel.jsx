@@ -371,13 +371,18 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
   // Site Branding State
   const [siteName, setSiteName] = useState('لینک شو');
-  const [siteSlogan, setSiteSlogan] = useState('نیازمندی‌های فارسی‌زبانان در سراسر اسکاندیناوی');
+  const [siteSlogan, setSiteSlogan] = useState('محل رشد کسب و کار فارسی‌زبانان');
   const [logoUrl, setLogoUrl] = useState('');
   const [faviconUrl, setFaviconUrl] = useState('');
   const [uploadingBrandKey, setUploadingBrandKey] = useState(null);
   const [supportEmail, setSupportEmail] = useState('swedpersiska@gmail.com');
   const [supportTelegram, setSupportTelegram] = useState('@SwedPersiska');
   const [supportPhone, setSupportPhone] = useState('');
+  const [socialInstagram, setSocialInstagram] = useState('https://instagram.com');
+  const [socialTelegram, setSocialTelegram] = useState('https://t.me');
+  const [socialWhatsapp, setSocialWhatsapp] = useState('');
+  const [socialYoutube, setSocialYoutube] = useState('');
+  const [socialLinkedin, setSocialLinkedin] = useState('');
 
   // SEO Settings State (Per Country — Complete & Synced with Frontend)
   const DEFAULT_COUNTRY_SEO = {
@@ -496,6 +501,11 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         setSupportEmail(item.value.supportEmail || '');
         setSupportTelegram(item.value.supportTelegram || '');
         setSupportPhone(item.value.supportPhone || '');
+        setSocialInstagram(item.value.socialInstagram ?? 'https://instagram.com');
+        setSocialTelegram(item.value.socialTelegram || item.value.supportTelegram || 'https://t.me');
+        setSocialWhatsapp(item.value.socialWhatsapp || '');
+        setSocialYoutube(item.value.socialYoutube || '');
+        setSocialLinkedin(item.value.socialLinkedin || '');
       }
       if (item.key === 'seo_settings' && item.value) {
         const cleanText = (str) =>
@@ -1167,7 +1177,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         faviconUrl: faviconUrl.trim(),
         supportEmail: supportEmail.trim(),
         supportTelegram: supportTelegram.trim(),
-        supportPhone: supportPhone.trim()
+        supportPhone: supportPhone.trim(),
+        socialInstagram: socialInstagram.trim(),
+        socialTelegram: socialTelegram.trim(),
+        socialWhatsapp: socialWhatsapp.trim(),
+        socialYoutube: socialYoutube.trim(),
+        socialLinkedin: socialLinkedin.trim()
       };
 
       const apiRes = await adminApi.request('save_settings', { key: 'site_branding', value: payload });
@@ -4240,6 +4255,78 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs text-left"
                       dir="ltr"
                     />
+                  </div>
+                </div>
+
+                {/* Footer Social Media Links (Displayed under Footer Logo) */}
+                <div className="pt-4 border-t border-stone-200/80 space-y-3">
+                  <div>
+                    <h4 className="text-xs font-extrabold text-zinc-900">شبکه‌های اجتماعی فوتر (نمایش زیر لوگوی فوتر)</h4>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      هر شبکه‌ای را که پر کنید، آیکون آن زیر لوگو در فوتر سایت نمایش داده می‌شود (برای مخفی کردن، فیلد را خالی بگذارید).
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1">اینستاگرام (Instagram)</label>
+                      <input
+                        type="text"
+                        value={socialInstagram}
+                        onChange={(e) => setSocialInstagram(e.target.value)}
+                        placeholder="https://instagram.com/..."
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all text-left"
+                        dir="ltr"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1">تلگرام (Telegram)</label>
+                      <input
+                        type="text"
+                        value={socialTelegram}
+                        onChange={(e) => setSocialTelegram(e.target.value)}
+                        placeholder="https://t.me/..."
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all text-left"
+                        dir="ltr"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1">واتساپ (WhatsApp)</label>
+                      <input
+                        type="text"
+                        value={socialWhatsapp}
+                        onChange={(e) => setSocialWhatsapp(e.target.value)}
+                        placeholder="+46700000000"
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all text-left"
+                        dir="ltr"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1">یوتیوب (YouTube)</label>
+                      <input
+                        type="text"
+                        value={socialYoutube}
+                        onChange={(e) => setSocialYoutube(e.target.value)}
+                        placeholder="https://youtube.com/@..."
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all text-left"
+                        dir="ltr"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1">لینکدین (LinkedIn)</label>
+                      <input
+                        type="text"
+                        value={socialLinkedin}
+                        onChange={(e) => setSocialLinkedin(e.target.value)}
+                        placeholder="https://linkedin.com/company/..."
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all text-left"
+                        dir="ltr"
+                      />
+                    </div>
                   </div>
                 </div>
 
