@@ -550,6 +550,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   });
   const [newPodcastVideoUrl, setNewPodcastVideoUrl] = useState('');
   const [newPodcastVideoTitle, setNewPodcastVideoTitle] = useState('');
+  const [sellerDeployments, setSellerDeployments] = useState([]);
+  const [deletingDeployment, setDeletingDeployment] = useState('');
 
   const [adminTurnstileToken, setAdminTurnstileToken] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
@@ -643,6 +645,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           ...item.value,
           manualVideos: Array.isArray(item.value.manualVideos) ? item.value.manualVideos : [],
         }));
+      }
+      if (item.key === 'seller_deployments' && Array.isArray(item.value)) {
+        setSellerDeployments(item.value);
       }
       if (item.key === 'portal_categories' && item.value && Array.isArray(item.value) && item.value.length > 0) {
         setCategoriesList(item.value);
@@ -1735,6 +1740,33 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       triggerToast('خطا در ذخیره تنظیمات پادکست خبری: ' + err.message, 'error');
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  // Delete / Terminate a Seller Panel Worker & D1 Database on Cloudflare (e.g., if unpaid)
+  const handleDeleteSellerDeployment = async (dep) => {
+    if (!dep?.workerName) return;
+    setDeletingDeployment(dep.workerName);
+    try {
+      const deployBase = import.meta.env?.VITE_SELLER_DEPLOY_URL || 'https://linksho-seller.vercel.app/api/cloudflare/deploy';
+      const delUrl = `${deployBase}?workerName=${encodeURIComponent(dep.workerName)}&dbId=${encodeURIComponent(dep.dbId || '')}`;
+      await fetch(delUrl, { method: 'DELETE' }).catch(() => {});
+
+      const nextList = sellerDeployments.filter(d => d.workerName !== dep.workerName);
+      const apiRes = await adminApi.request('save_settings', { key: 'seller_deployments', value: nextList });
+      if (!apiRes || !apiRes.ok) {
+        await supabase.from('swedpersiska_settings').upsert({
+          key: 'seller_deployments',
+          value: nextList,
+          updated_at: new Date().toISOString(),
+        });
+      }
+      setSellerDeployments(nextList);
+      triggerToast(`پنل فروش «${dep.name}» از کلودفلر حذف شد.`, 'success');
+    } catch (err) {
+      triggerToast('خطا در حذف پنل فروش: ' + err.message, 'error');
+    } finally {
+      setDeletingDeployment('');
     }
   };
 
@@ -4430,6 +4462,63 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 </button>
               </form>
 
+              {/* Deployed Seller Panels (Cloudflare Workers + D1 Control) */}
+              <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-zinc-900">
+                      وب‌سایت‌ها و پنل‌های فروش ساخته‌شده ({sellerDeployments.length})
+                    </h3>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      اشتراک ۲۴۰ کرون ماهانه • در صورت عدم پرداخت می‌توانید پنل و دیتابیس کلودفلر مشتری را با ۱ کلیک حذف کنید.
+                    </p>
+                  </div>
+                </div>
+
+                {sellerDeployments.length === 0 ? (
+                  <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/70 text-center text-xs text-stone-400">
+                    هنوز هیچ پنل فروشی توسط کاربران ساخته نشده است.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/80 overflow-hidden">
+                    {sellerDeployments.map((dep) => (
+                      <div key={dep.workerName} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black text-zinc-900">{dep.name}</span>
+                            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold">
+                              {dep.type === 'restaurant' ? 'رستوران' : 'فروشگاه'}
+                            </span>
+                            <span className="font-mono text-[10px] text-stone-500">{dep.storeId}</span>
+                          </div>
+                          <a
+                            href={dep.panelUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] font-mono text-[#0066CC] hover:underline truncate block"
+                            dir="ltr"
+                          >
+                            {dep.panelUrl}
+                          </a>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            disabled={deletingDeployment === dep.workerName}
+                            onClick={() => handleDeleteSellerDeployment(dep)}
+                            className="h-8 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <Trash2 size={13} />
+                            <span>{deletingDeployment === dep.workerName ? 'در حال حذف...' : 'حذف از کلودفلر'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
             </div>
               )}
 
@@ -4578,6 +4667,63 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   <span>{savingSettings ? 'در حال ذخیره‌سازی...' : 'ذخیره تنظیمات'}</span>
                 </button>
               </form>
+
+              {/* Deployed Seller Panels (Cloudflare Workers + D1 Control) */}
+              <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-zinc-900">
+                      وب‌سایت‌ها و پنل‌های فروش ساخته‌شده ({sellerDeployments.length})
+                    </h3>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      اشتراک ۲۴۰ کرون ماهانه • در صورت عدم پرداخت می‌توانید پنل و دیتابیس کلودفلر مشتری را با ۱ کلیک حذف کنید.
+                    </p>
+                  </div>
+                </div>
+
+                {sellerDeployments.length === 0 ? (
+                  <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/70 text-center text-xs text-stone-400">
+                    هنوز هیچ پنل فروشی توسط کاربران ساخته نشده است.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/80 overflow-hidden">
+                    {sellerDeployments.map((dep) => (
+                      <div key={dep.workerName} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black text-zinc-900">{dep.name}</span>
+                            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold">
+                              {dep.type === 'restaurant' ? 'رستوران' : 'فروشگاه'}
+                            </span>
+                            <span className="font-mono text-[10px] text-stone-500">{dep.storeId}</span>
+                          </div>
+                          <a
+                            href={dep.panelUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] font-mono text-[#0066CC] hover:underline truncate block"
+                            dir="ltr"
+                          >
+                            {dep.panelUrl}
+                          </a>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            disabled={deletingDeployment === dep.workerName}
+                            onClick={() => handleDeleteSellerDeployment(dep)}
+                            className="h-8 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <Trash2 size={13} />
+                            <span>{deletingDeployment === dep.workerName ? 'در حال حذف...' : 'حذف از کلودفلر'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
             </div>
               )}

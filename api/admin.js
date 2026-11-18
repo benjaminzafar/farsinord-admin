@@ -425,7 +425,7 @@ export default async function handler(req, res) {
 
     if (action === 'save_settings') {
       const { key, value } = body;
-      const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'portal_countries', 'stripe_settings', 'turnstile_settings', 'analytics_settings', 'r2_settings', 'podcast_settings'];
+      const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'portal_countries', 'stripe_settings', 'turnstile_settings', 'analytics_settings', 'r2_settings', 'podcast_settings', 'seller_deployments'];
       if (!allowedKeys.includes(key)) {
         return res.status(400).json({ ok: false, error: 'Invalid settings key' });
       }
