@@ -419,7 +419,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef(null);
   const topSearchRef = useRef(null);
-  const [countryFilter, setCountryFilter] = useState('all'); // 'all' | 'se' | 'no' | 'dk' | 'fi'
+  const mainScrollRef = useRef(null);
+  const toastTimerRef = useRef(null);
+  const [countryFilter, setCountryFilter] = useState('all'); // 'all' | 'se' | 'no' | 'dk' | 'fi' | 'de' | 'at' | 'nl' | 'fr'
   const [categoryFilter, setCategoryFilter] = useState('all');
 
   // Centered Detail Modal & Toast State
@@ -428,6 +430,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const notifRef = useRef(null);
   const [copiedKey, setCopiedKey] = useState(null);
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
+  const [actionToastType, setActionToastType] = useState('success');
 
   // Site Branding State
   const [siteName, setSiteName] = useState('لینک شو');
@@ -536,12 +539,14 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [savingSettings, setSavingSettings] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
 
-  // Toast Helper
-  const triggerToast = (msg) => {
+  // Toast Helper (supports 'success' and 'error' confirmation popup)
+  const triggerToast = (msg, type = 'success') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setActionToastType(type);
     setActionSuccessMsg(msg);
-    setTimeout(() => {
+    toastTimerRef.current = setTimeout(() => {
       setActionSuccessMsg('');
-    }, 3000);
+    }, 3800);
   };
 
   // Zero-CPU feedback stub (avoids spawning unclosed WebAudio hardware threads)
@@ -639,17 +644,13 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     try {
       // Try Secure Serverless Admin API first
       const apiRes = await adminApi.request('overview');
-      if (apiRes && apiRes.unauthorized) {
-        setIsAuthenticated(false);
-        return;
-      }
       if (apiRes && apiRes.ok) {
         setCounts(apiRes.counts);
         setCountryStats(apiRes.countryStats);
         setCategoryCounts(apiRes.categoryCounts);
         setRecentActiveAds(apiRes.recentActiveAds || []);
         applySettingsItems(apiRes.settings);
-        await fetchActiveAds(1, searchQuery, countryFilter, categoryFilter);
+        await fetchActiveAds(activePage || 1, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
         return;
       }
 
@@ -668,12 +669,16 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       const pend = pendingRes.count ?? 0;
       const vip = vipRes.count ?? 0;
 
-      // Compute aggregates
+      // Compute aggregates across all 8 European countries
       const cStats = {
         se: { total: 0, active: 0, vip: 0, views: 0 },
         no: { total: 0, active: 0, vip: 0, views: 0 },
         dk: { total: 0, active: 0, vip: 0, views: 0 },
-        fi: { total: 0, active: 0, vip: 0, views: 0 }
+        fi: { total: 0, active: 0, vip: 0, views: 0 },
+        de: { total: 0, active: 0, vip: 0, views: 0 },
+        at: { total: 0, active: 0, vip: 0, views: 0 },
+        nl: { total: 0, active: 0, vip: 0, views: 0 },
+        fr: { total: 0, active: 0, vip: 0, views: 0 }
       };
       const catCounts = {};
       let totalV = 0;
@@ -703,8 +708,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       setCategoryCounts(catCounts);
       setRecentActiveAds(recentRes.data || []);
 
-      // Fetch first page (10 records) for active ads
-      await fetchActiveAds(1, searchQuery, countryFilter, categoryFilter);
+      // Fetch current page for active ads
+      await fetchActiveAds(activePage || 1, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
 
       // 2. Fetch Settings
       applySettingsItems(settingsRes.data);
@@ -715,30 +720,26 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   };
 
-  // 2. Fetch Ads with Server-side Pagination (10 records limit)
+  // 2. Fetch Ads with Server-side Pagination (10 records limit, deterministic ordering)
   const fetchActiveAds = async (page = 1, search = searchQuery, country = countryFilter, cat = categoryFilter, status = adStatusFilter, vipOnly = vipOnlyFilter) => {
+    const safePage = Math.max(1, Number(page) || 1);
+    setActivePage(safePage);
     setActiveLoading(true);
     try {
-      const apiRes = await adminApi.request('active_ads', { page, search, country, category: cat, status, vipOnly });
-      if (apiRes && apiRes.unauthorized) {
-        setIsAuthenticated(false);
-        return;
-      }
+      const apiRes = await adminApi.request('active_ads', { page: safePage, search, country, category: cat, status, vipOnly });
       if (apiRes && apiRes.ok) {
         setActiveAds(apiRes.ads || []);
         setActiveTotalCount(apiRes.count ?? 0);
-        setActivePage(page);
+        setActivePage(safePage);
         return;
       }
 
-      const from = (page - 1) * PAGE_SIZE;
+      const from = (safePage - 1) * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
 
       let q = supabase
         .from('swedpersiska_ads')
-        .select('*', { count: 'exact' })
-        .order('created_at', { ascending: false })
-        .range(from, to);
+        .select('*', { count: 'exact' });
 
       if (status && status !== 'all') {
         q = q.eq('status', status);
@@ -761,14 +762,21 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         }
       }
 
+      q = q
+        .order('is_featured', { ascending: false })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to);
+
       const { data, count, error } = await q;
       if (error) throw error;
 
       setActiveAds(data || []);
       setActiveTotalCount(count ?? 0);
-      setActivePage(page);
+      setActivePage(safePage);
     } catch (err) {
       console.error('Error fetching active ads:', err);
+      triggerToast('خطا در بارگذاری صفحه آگهی‌ها: ' + (err.message || ''), 'error');
     } finally {
       setActiveLoading(false);
     }
@@ -782,17 +790,19 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     } catch {}
     try {
       const apiRes = await adminApi.request('save_settings', { key: 'portal_categories', value: updated });
-      if (!apiRes) {
-        await supabase
+      if (!apiRes || !apiRes.ok) {
+        const { error } = await supabase
           .from('swedpersiska_settings')
           .upsert({
             key: 'portal_categories',
             value: updated,
             updated_at: new Date().toISOString()
           });
+        if (error) throw error;
       }
     } catch (err) {
       console.error('Error saving categories to Supabase:', err);
+      triggerToast('خطا در ذخیره دسته‌بندی‌ها در دیتابیس', 'error');
     }
   };
 
@@ -804,17 +814,19 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     } catch {}
     try {
       const apiRes = await adminApi.request('save_settings', { key: 'portal_cities', value: updated });
-      if (!apiRes) {
-        await supabase
+      if (!apiRes || !apiRes.ok) {
+        const { error } = await supabase
           .from('swedpersiska_settings')
           .upsert({
             key: 'portal_cities',
             value: updated,
             updated_at: new Date().toISOString()
           });
+        if (error) throw error;
       }
     } catch (err) {
       console.error('Error saving cities to Supabase:', err);
+      triggerToast('خطا در ذخیره شهرها در دیتابیس', 'error');
     }
   };
 
@@ -826,17 +838,19 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     } catch {}
     try {
       const apiRes = await adminApi.request('save_settings', { key: 'portal_countries', value: updated });
-      if (!apiRes) {
-        await supabase
+      if (!apiRes || !apiRes.ok) {
+        const { error } = await supabase
           .from('swedpersiska_settings')
           .upsert({
             key: 'portal_countries',
             value: updated,
             updated_at: new Date().toISOString()
           });
+        if (error) throw error;
       }
     } catch (err) {
       console.error('Error saving countries to Supabase:', err);
+      triggerToast('خطا در ذخیره کشورها در دیتابیس', 'error');
     }
   };
 
@@ -1206,7 +1220,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     playFeedback('click');
     try {
       const apiRes = await adminApi.request('update_country', { id: adId, country: newCountry });
-      if (!apiRes) {
+      if (!apiRes || !apiRes.ok) {
         const { error } = await supabase
           .from('swedpersiska_ads')
           .update({ country: newCountry })
@@ -1220,7 +1234,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       triggerToast(`کشور آگهی به ${countryObj.nameFa} تغییر یافت.`);
       if (onRefreshAds) onRefreshAds();
     } catch (err) {
-      alert('خطا در تغییر کشور آگهی: ' + err.message);
+      triggerToast('خطا در تغییر کشور آگهی: ' + err.message, 'error');
     }
   };
 
@@ -1230,7 +1244,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     try {
       const nextVal = !ad.is_featured;
       const apiRes = await adminApi.request('toggle_featured', { id: ad.id, is_featured: nextVal });
-      if (!apiRes) {
+      if (!apiRes || !apiRes.ok) {
         const { error } = await supabase
           .from('swedpersiska_ads')
           .update({ is_featured: nextVal })
@@ -1244,10 +1258,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         ...prev,
         vip: nextVal ? prev.vip + 1 : Math.max(0, prev.vip - 1)
       }));
-      triggerToast(nextVal ? 'آگهی به وضعیت ویژه ارتقا یافت.' : 'نشان ویژه حذف شد.');
+      triggerToast(nextVal ? 'آگهی به وضعیت ویژه (VIP) ارتقا یافت.' : 'نشان ویژه حذف شد.');
       if (onRefreshAds) onRefreshAds();
     } catch (err) {
-      alert('خطا در تغییر وضعیت ویژه: ' + err.message);
+      triggerToast('خطا در تغییر وضعیت ویژه: ' + err.message, 'error');
     }
   };
 
@@ -1261,7 +1275,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const dismissReportAdmin = async (reportId) => {
     try {
       const apiRes = await adminApi.request('dismiss_report', { reportId });
-      if (!apiRes) {
+      if (!apiRes || !apiRes.ok) {
         const nextList = adReports.filter(r => String(r.id) !== String(reportId));
         await supabase.from('swedpersiska_settings').upsert({
           key: 'ad_reports',
@@ -1272,7 +1286,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       setAdReports(prev => prev.filter(r => String(r.id) !== String(reportId)));
       triggerToast('گزارش بسته شد.');
     } catch (err) {
-      alert('خطا در بستن گزارش: ' + err.message);
+      triggerToast('خطا در بستن گزارش: ' + err.message, 'error');
     }
   };
 
@@ -1281,7 +1295,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     playFeedback('vip');
     try {
       const apiRes = await adminApi.request('update_status', { id: adId, status: 'active' });
-      if (!apiRes) {
+      if (!apiRes || !apiRes.ok) {
         const { error } = await supabase
           .from('swedpersiska_ads')
           .update({ status: 'active', updated_at: new Date().toISOString() })
@@ -1302,7 +1316,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       triggerToast('آگهی تایید و در سایت منتشر شد.');
       if (onRefreshAds) onRefreshAds();
     } catch (err) {
-      alert('خطا در تایید آگهی: ' + err.message);
+      triggerToast('خطا در تایید آگهی: ' + err.message, 'error');
     }
   };
 
@@ -1314,7 +1328,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     playFeedback('delete');
     try {
       const apiRes = await adminApi.request('delete_ad', { id });
-      if (!apiRes) {
+      if (!apiRes || !apiRes.ok) {
         const { error } = await supabase
           .from('swedpersiska_ads')
           .delete()
@@ -1334,7 +1348,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       triggerToast('آگهی برای همیشه حذف شد.');
       if (onRefreshAds) onRefreshAds();
     } catch (err) {
-      alert('خطا در حذف آگهی: ' + err.message);
+      triggerToast('خطا در حذف آگهی: ' + err.message, 'error');
     }
   };
 
@@ -1342,7 +1356,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const handleBrandingFileUpload = async (file, kind) => {
     if (!file) return;
     if (file.size > 1048576) {
-      alert('حداکثر حجم مجاز برای لوگو یا آیکون ۱ مگابایت است.');
+      triggerToast('حداکثر حجم مجاز برای لوگو یا آیکون ۱ مگابایت است.', 'error');
       return;
     }
     setUploadingBrandKey(kind);
@@ -1371,7 +1385,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       }
       triggerToast('فایل با موفقیت آپلود شد! برای ثبت نهایی «ذخیره مشخصات» را بزنید.');
     } catch (err) {
-      alert(err.message || 'خطا در آپلود تصویر');
+      triggerToast(err.message || 'خطا در آپلود تصویر', 'error');
     } finally {
       setUploadingBrandKey(null);
     }
@@ -1398,7 +1412,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       };
 
       const apiRes = await adminApi.request('save_settings', { key: 'site_branding', value: payload });
-      if (!apiRes) {
+      if (!apiRes || !apiRes.ok) {
         const { error } = await supabase
           .from('swedpersiska_settings')
           .upsert({
@@ -1408,10 +1422,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           });
         if (error) throw error;
       }
-      setSaveSuccessMsg('تنظیمات برند ذخیره شد.');
-      setTimeout(() => setSaveSuccessMsg(''), 3000);
+      const msg = 'مشخصات برند و لینک‌های فوتر با موفقیت ذخیره شد!';
+      setSaveSuccessMsg(msg);
+      triggerToast(msg, 'success');
+      setTimeout(() => setSaveSuccessMsg(''), 3500);
     } catch (err) {
-      alert('خطا در ذخیره تنظیمات برند: ' + err.message);
+      triggerToast('خطا در ذخیره تنظیمات برند: ' + err.message, 'error');
     } finally {
       setSavingSettings(false);
     }
@@ -1424,7 +1440,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     try {
       await persistCountries(countriesList);
       const apiRes = await adminApi.request('save_settings', { key: 'seo_settings', value: seoSettings });
-      if (!apiRes) {
+      if (!apiRes || !apiRes.ok) {
         const { error } = await supabase
           .from('swedpersiska_settings')
           .upsert({
@@ -1435,10 +1451,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         if (error) throw error;
       }
       const countryObj = countriesList.find(c => c.id === seoActiveCountry) || countriesList[0];
-      setSaveSuccessMsg(`تنظیمات سئو و پس‌زمینه کشور ${countryObj.nameFa} ذخیره شد.`);
-      setTimeout(() => setSaveSuccessMsg(''), 3000);
+      const msg = `تنظیمات سئو و پس‌زمینه کشور ${countryObj.nameFa} با موفقیت ذخیره شد!`;
+      setSaveSuccessMsg(msg);
+      triggerToast(msg, 'success');
+      setTimeout(() => setSaveSuccessMsg(''), 3500);
     } catch (err) {
-      alert('خطا در ذخیره سئو: ' + err.message);
+      triggerToast('خطا در ذخیره سئو: ' + err.message, 'error');
     } finally {
       setSavingSettings(false);
     }
@@ -1448,7 +1466,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     e.preventDefault();
     const cleanId = (analyticsSettings.measurementId || '').trim().toUpperCase();
     if (analyticsSettings.enabled && !/^G-[A-Z0-9]{4,}$/.test(cleanId)) {
-      alert('لطفاً شناسه معتبر گوگل آنالیتیکس وارد کنید (مثال: G-XXXXXXXXXX).');
+      triggerToast('لطفاً شناسه معتبر گوگل آنالیتیکس وارد کنید (مثال: G-XXXXXXXXXX).', 'error');
       return;
     }
     const payload = { enabled: Boolean(analyticsSettings.enabled), measurementId: cleanId };
@@ -1456,7 +1474,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     setSavingSettings(true);
     try {
       const apiRes = await adminApi.request('save_settings', { key: 'analytics_settings', value: payload });
-      if (!apiRes) {
+      if (!apiRes || !apiRes.ok) {
         const { error } = await supabase
           .from('swedpersiska_settings')
           .upsert({
@@ -1466,10 +1484,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           });
         if (error) throw error;
       }
-      setSaveSuccessMsg('تنظیمات گوگل آنالیتیکس با موفقیت ذخیره شد.');
-      setTimeout(() => setSaveSuccessMsg(''), 3000);
+      const msg = 'تنظیمات گوگل آنالیتیکس با موفقیت ذخیره شد!';
+      setSaveSuccessMsg(msg);
+      triggerToast(msg, 'success');
+      setTimeout(() => setSaveSuccessMsg(''), 3500);
     } catch (err) {
-      alert('خطا در ذخیره تنظیمات آنالیتیکس: ' + err.message);
+      triggerToast('خطا در ذخیره تنظیمات آنالیتیکس: ' + err.message, 'error');
     } finally {
       setSavingSettings(false);
     }
@@ -1478,7 +1498,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const saveR2Settings = async (e) => {
     e.preventDefault();
     if (r2Settings.enabled && (!r2Settings.accountId.trim() || !r2Settings.bucketName.trim() || !r2Settings.publicUrl.trim())) {
-      alert('لطفاً شناسه حساب، نام سطل ذخیره‌سازی و آدرس عمومی دامنه تصاویر را وارد کنید.');
+      triggerToast('لطفاً شناسه حساب، نام سطل ذخیره‌سازی و آدرس عمومی دامنه تصاویر را وارد کنید.', 'error');
       return;
     }
     setSavingSettings(true);
@@ -1492,7 +1512,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         secretAccessKey: r2Settings.secretAccessKey.trim()
       };
       const apiRes = await adminApi.request('save_settings', { key: 'r2_settings', value: payload });
-      if (!apiRes) {
+      if (!apiRes || !apiRes.ok) {
         const { error } = await supabase
           .from('swedpersiska_settings')
           .upsert({
@@ -1508,10 +1528,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         accessKeyId: '',
         secretAccessKey: ''
       }));
-      setSaveSuccessMsg('تنظیمات فضای ابری کلودفلر R2 با موفقیت ذخیره شد.');
-      setTimeout(() => setSaveSuccessMsg(''), 3000);
+      const msg = 'تنظیمات فضای ابری کلودفلر R2 با موفقیت ذخیره شد!';
+      setSaveSuccessMsg(msg);
+      triggerToast(msg, 'success');
+      setTimeout(() => setSaveSuccessMsg(''), 3500);
     } catch (err) {
-      alert('خطا در ذخیره تنظیمات فضای ابری: ' + err.message);
+      triggerToast('خطا در ذخیره تنظیمات فضای ابری: ' + err.message, 'error');
     } finally {
       setSavingSettings(false);
     }
@@ -1532,7 +1554,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         vipBadgeText: stripeSettings.vipBadgeText || 'ویژه (VIP)'
       };
       const apiRes = await adminApi.request('save_settings', { key: 'stripe_settings', value: publicStripePayload });
-      if (!apiRes) {
+      if (!apiRes || !apiRes.ok) {
         const { error } = await supabase
           .from('swedpersiska_settings')
           .upsert({
@@ -1542,10 +1564,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           });
         if (error) throw error;
       }
-      setSaveSuccessMsg('تنظیمات درگاه Stripe ذخیره شد.');
-      setTimeout(() => setSaveSuccessMsg(''), 3000);
+      const msg = 'تنظیمات درگاه پرداخت و تعرفه ویژه (VIP) با موفقیت ذخیره شد!';
+      setSaveSuccessMsg(msg);
+      triggerToast(msg, 'success');
+      setTimeout(() => setSaveSuccessMsg(''), 3500);
     } catch (err) {
-      alert('خطا در ذخیره تنظیمات Stripe: ' + err.message);
+      triggerToast('خطا در ذخیره تنظیمات درگاه پرداخت: ' + err.message, 'error');
     } finally {
       setSavingSettings(false);
     }
@@ -1565,7 +1589,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       };
       localStorage.setItem('swedpersiska_turnstile_settings', JSON.stringify(publicTurnstilePayload));
       const apiRes = await adminApi.request('save_settings', { key: 'turnstile_settings', value: publicTurnstilePayload });
-      if (!apiRes) {
+      if (!apiRes || !apiRes.ok) {
         const { error } = await supabase
           .from('swedpersiska_settings')
           .upsert({
@@ -1575,12 +1599,13 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           });
         if (error) throw error;
       }
-      setSaveSuccessMsg('تنظیمات آنتی‌بات کلودفلر ذخیره شد.');
-      setTimeout(() => setSaveSuccessMsg(''), 3000);
+      const msg = 'تنظیمات امنیتی و آنتی‌بات کلودفلر با موفقیت ذخیره شد!';
+      setSaveSuccessMsg(msg);
+      triggerToast(msg, 'success');
+      setTimeout(() => setSaveSuccessMsg(''), 3500);
     } catch (err) {
       console.error('Error saving turnstile settings:', err);
-      setSaveSuccessMsg('تنظیمات به صورت محلی ذخیره شد.');
-      setTimeout(() => setSaveSuccessMsg(''), 3000);
+      triggerToast('خطا در ذخیره تنظیمات آنتی‌بات: ' + err.message, 'error');
     } finally {
       setSavingSettings(false);
     }
@@ -1835,11 +1860,29 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       data-testid="admin-page"
     >
       
-      {/* Dynamic Island Toast */}
+      {/* Prominent Floating Save & Action Confirmation Popup */}
       {actionSuccessMsg && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-full bg-zinc-950 text-white px-4 py-2 text-xs font-semibold shadow-2xl border border-white/15 animate-in fade-in slide-in-from-top-3 duration-200 select-none">
-          <CheckCircle size={15} className="text-[#34c759] shrink-0" />
+        <div
+          className={`fixed top-5 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2.5 rounded-2xl px-4 py-3 text-xs font-extrabold shadow-[0_18px_45px_rgba(0,0,0,0.28)] border animate-in fade-in slide-in-from-top-3 duration-200 select-none ${
+            actionToastType === 'error'
+              ? 'bg-rose-600 text-white border-rose-400/50'
+              : 'bg-zinc-950 text-white border-emerald-400/40'
+          }`}
+        >
+          {actionToastType === 'error' ? (
+            <AlertCircle size={17} className="text-white shrink-0" />
+          ) : (
+            <CheckCircle size={17} className="text-[#34c759] shrink-0" />
+          )}
           <span>{actionSuccessMsg}</span>
+          <button
+            type="button"
+            onClick={() => setActionSuccessMsg('')}
+            className="ms-1 p-0.5 rounded-full hover:bg-white/15 text-white/75 hover:text-white cursor-pointer"
+            title="بستن"
+          >
+            <X size={13} />
+          </button>
         </div>
       )}
 
@@ -2109,7 +2152,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       {/* ========================================================
           2. MAIN SCROLLABLE CONTENT AREA (INDEPENDENT FROM SIDEBAR)
       ======================================================== */}
-      <div className="flex-1 w-full h-full overflow-y-auto overflow-x-hidden no-scrollbar flex flex-col min-w-0 px-2.5 pb-8 sm:px-4 lg:px-0 lg:pb-8">
+      <div ref={mainScrollRef} className="flex-1 w-full h-full overflow-y-auto overflow-x-hidden no-scrollbar flex flex-col min-w-0 px-2.5 pb-8 sm:px-4 lg:px-0 lg:pb-8">
         
         {/* Top Desktop Nav Bar */}
         <header className="hidden lg:flex items-center justify-between h-[68px] px-5 bg-white/95 backdrop-blur-md rounded-2xl border border-stone-200/90 shadow-[0_2px_12px_rgba(0,0,0,0.03)] mb-5 sticky top-0 shrink-0 z-20 select-none gap-4">
@@ -2459,42 +2502,41 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   <span className="text-xs text-stone-500">برای فیلتر کردن آگهی‌های هر کشور کلیک کنید</span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {countriesList.map(country => {
                     const stats = getCountryStats(country.id);
                     return (
                       <div 
                         key={country.id}
-                        onClick={() => { setCountryFilter(country.id); handleTabChange('ads'); }}
-                        className="p-4 sm:p-5 rounded-2xl border border-stone-200/80 hover:border-blue-400/80 bg-white hover:shadow-sm active:scale-[0.99] transition-all cursor-pointer flex flex-col justify-between group text-right shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                        onClick={() => {
+                          setCountryFilter(country.id);
+                          handleTabChange('ads');
+                          fetchActiveAds(1, searchQuery, country.id, categoryFilter, adStatusFilter, vipOnlyFilter);
+                        }}
+                        className="p-3.5 rounded-2xl border border-stone-200/80 hover:border-blue-400/80 bg-white hover:shadow-sm active:scale-[0.99] transition-all cursor-pointer flex flex-col justify-between group text-right shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <div className="flex items-center gap-2 min-w-0">
                             {renderCountryFlag(country.id)}
-                            <span className="font-extrabold text-[14px] text-stone-900 group-hover:text-blue-600 transition-colors truncate">
+                            <span className="font-extrabold text-[13px] text-stone-900 group-hover:text-blue-600 transition-colors truncate">
                               {country.nameFa}
                             </span>
                           </div>
-                          <span className="px-2.5 py-0.5 rounded-lg bg-stone-100 group-hover:bg-blue-50 group-hover:text-blue-700 text-stone-700 text-[11px] font-bold transition-colors shrink-0">
+                          <span className="px-2 py-0.5 rounded-lg bg-stone-100 group-hover:bg-blue-50 group-hover:text-blue-700 text-stone-700 text-[10.5px] font-bold transition-colors shrink-0">
                             <span className="tabular-nums font-bold">{stats.total}</span> آگهی
                           </span>
                         </div>
 
-                        <div className="flex items-center justify-between pt-3 mt-3 border-t border-stone-100 text-[11.5px] gap-2">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0"></span>
+                        <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-stone-100 text-[11px] gap-1.5">
+                          <div className="flex items-center gap-1 min-w-0">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0"></span>
                             <span className="text-stone-500 font-medium">فعال:</span>
                             <span className="font-bold text-stone-900 tabular-nums">{stats.active}</span>
                           </div>
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="h-2 w-2 rounded-full bg-amber-500 shrink-0"></span>
+                          <div className="flex items-center gap-1 min-w-0">
+                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0"></span>
                             <span className="text-amber-700 font-medium">ویژه:</span>
                             <span className="font-bold text-amber-800 tabular-nums">{stats.vip}</span>
-                          </div>
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="h-2 w-2 rounded-full bg-purple-400 shrink-0"></span>
-                            <span className="text-stone-500 font-medium">بازدید:</span>
-                            <span className="font-bold text-stone-900 tabular-nums">{Number(stats.views).toLocaleString('sv-SE')}</span>
                           </div>
                         </div>
                       </div>
@@ -2775,7 +2817,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       onClick={() => {
                         playFeedback('select');
                         setCountryFilter('all');
-                        fetchActiveAds(1, searchQuery, 'all', categoryFilter);
+                        fetchActiveAds(1, searchQuery, 'all', categoryFilter, adStatusFilter, vipOnlyFilter);
                       }}
                       className={`min-h-[30px] px-3.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all select-none active:scale-95 cursor-pointer ${
                         countryFilter === 'all'
@@ -2797,7 +2839,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                           onClick={() => {
                             playFeedback('select');
                             setCountryFilter(country.id);
-                            fetchActiveAds(1, searchQuery, country.id, categoryFilter);
+                            fetchActiveAds(1, searchQuery, country.id, categoryFilter, adStatusFilter, vipOnlyFilter);
                           }}
                           className={`min-h-[30px] px-3 rounded-lg text-xs font-bold whitespace-nowrap transition-all select-none flex items-center gap-1.5 active:scale-95 cursor-pointer ${
                             isSelected
@@ -2828,7 +2870,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       onChange={(e) => {
                         const val = e.target.value;
                         setSearchQuery(val);
-                        fetchActiveAds(1, val, countryFilter, categoryFilter);
+                        fetchActiveAds(1, val, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
                       }}
                       className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 ps-9 pe-8 text-xs text-zinc-900 placeholder:text-stone-400 focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
                     />
@@ -2837,7 +2879,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                         type="button"
                         onClick={() => {
                           setSearchQuery('');
-                          fetchActiveAds(1, '', countryFilter, categoryFilter);
+                          fetchActiveAds(1, '', countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
                         }}
                         className="absolute end-2.5 top-1/2 -translate-y-1/2 p-1 text-stone-400 hover:text-stone-600 rounded-md cursor-pointer"
                       >
@@ -2852,7 +2894,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       onChange={(e) => {
                         const val = e.target.value;
                         setCategoryFilter(val);
-                        fetchActiveAds(1, searchQuery, countryFilter, val);
+                        fetchActiveAds(1, searchQuery, countryFilter, val, adStatusFilter, vipOnlyFilter);
                       }}
                       className="flex-1 sm:flex-initial h-10 rounded-xl bg-stone-50 border border-stone-200/80 px-3 text-xs font-semibold text-zinc-800 focus:bg-white focus:border-stone-400 focus:outline-none cursor-pointer shadow-2xs"
                     >
@@ -3170,7 +3212,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   currentPage={activePage}
                   totalCount={activeTotalCount}
                   pageSize={PAGE_SIZE}
-                  onPageChange={(p) => fetchActiveAds(p, searchQuery, countryFilter, categoryFilter)}
+                  onPageChange={(p) => {
+                    fetchActiveAds(p, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
+                    if (mainScrollRef.current) {
+                      mainScrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                  }}
                   loading={activeLoading}
                 />
               </div>
@@ -4110,10 +4157,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                         onChange={(e) => setStripeSettings(prev => ({ ...prev, currency: e.target.value }))}
                         className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-medium focus:border-stone-400 focus:outline-none transition-all cursor-pointer shadow-2xs"
                       >
-                        <option value="SEK">کرون سوئد</option>
-                        <option value="NOK">کرون نروژ</option>
-                        <option value="DKK">کرون دانمارک</option>
-                        <option value="EUR">یورو فنلاند</option>
+                        <option value="SEK">کرون سوئد (SEK)</option>
+                        <option value="NOK">کرون نروژ (NOK)</option>
+                        <option value="DKK">کرون دانمارک (DKK)</option>
+                        <option value="EUR">یورو اروپا (EUR)</option>
                       </select>
                     </div>
 

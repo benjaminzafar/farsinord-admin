@@ -237,10 +237,7 @@ export default async function handler(req, res) {
 
       let q = supabase
         .from('swedpersiska_ads')
-        .select('*', { count: 'exact' })
-        .order('is_featured', { ascending: false })
-        .order('created_at', { ascending: false })
-        .range(from, to);
+        .select('*', { count: 'exact' });
 
       if (status && status !== 'all') q = q.eq('status', status);
       if (vipOnly) q = q.eq('is_featured', true);
@@ -254,6 +251,12 @@ export default async function handler(req, res) {
           q = q.or(`title.ilike.${term},description.ilike.${term},city.ilike.${term},reference_number.ilike.${term},contact_name.ilike.${term}`);
         }
       }
+
+      q = q
+        .order('is_featured', { ascending: false })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to);
 
       const { data, count, error } = await q;
       if (error) throw error;
