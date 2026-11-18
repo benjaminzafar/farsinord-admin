@@ -754,6 +754,14 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     try {
       // Try Secure Serverless Admin API first (single round-trip returns counts, settings, recent, and page 1)
       const apiRes = await adminApi.request('overview');
+      if (apiRes && (apiRes.status === 401 || apiRes.unauthorized)) {
+        adminApi.setToken('');
+        setIsAuthenticated(false);
+        const msg = apiRes.error || 'نشست مدیریتی منقضی شده است. لطفاً مجدداً وارد شوید.';
+        setLoginError(msg);
+        triggerToast(msg, 'error');
+        return;
+      }
       if (apiRes && apiRes.ok) {
         setHasServiceRoleConfig(apiRes.hasServiceRole !== false);
         setCounts(apiRes.counts);
@@ -946,7 +954,24 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   };
 
-  // Persist Categories to Supabase & localStorage
+  const assertAdminApiResponse = (apiRes, fallbackMsg) => {
+    if (apiRes && (apiRes.status === 401 || apiRes.unauthorized)) {
+      const msg = apiRes.error || 'نشست مدیریتی منقضی شده است. لطفاً مجدداً وارد شوید.';
+      adminApi.setToken('');
+      setIsAuthenticated(false);
+      setLoginError(msg);
+      throw new Error(msg);
+    }
+    if (!apiRes) {
+      throw new Error('ارتباط با سرور ادمین (/api/admin) برقرار نشد.');
+    }
+    if (!apiRes.ok) {
+      throw new Error(apiRes.error || fallbackMsg);
+    }
+    return apiRes;
+  };
+
+  // Persist Categories to Server & localStorage
   const persistCategories = async (updated) => {
     setCategoriesList(updated);
     try {
@@ -954,23 +979,14 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     } catch {}
     try {
       const apiRes = await adminApi.request('save_settings', { key: 'portal_categories', value: updated });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_settings')
-          .upsert({
-            key: 'portal_categories',
-            value: updated,
-            updated_at: new Date().toISOString()
-          });
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در ذخیره دسته‌بندی‌ها در دیتابیس');
     } catch (err) {
-      console.error('Error saving categories to Supabase:', err);
-      triggerToast('خطا در ذخیره دسته‌بندی‌ها در دیتابیس', 'error');
+      console.error('Error saving categories:', err);
+      triggerToast('خطا در ذخیره دسته‌بندی‌ها: ' + err.message, 'error');
     }
   };
 
-  // Persist Cities to Supabase & localStorage
+  // Persist Cities to Server & localStorage
   const persistCities = async (updated) => {
     setCitiesByCountry(updated);
     try {
@@ -978,23 +994,14 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     } catch {}
     try {
       const apiRes = await adminApi.request('save_settings', { key: 'portal_cities', value: updated });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_settings')
-          .upsert({
-            key: 'portal_cities',
-            value: updated,
-            updated_at: new Date().toISOString()
-          });
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در ذخیره شهرها در دیتابیس');
     } catch (err) {
-      console.error('Error saving cities to Supabase:', err);
-      triggerToast('خطا در ذخیره شهرها در دیتابیس', 'error');
+      console.error('Error saving cities:', err);
+      triggerToast('خطا در ذخیره شهرها: ' + err.message, 'error');
     }
   };
 
-  // Persist Countries & Country Hero Background Photos to Supabase & localStorage
+  // Persist Countries & Country Hero Background Photos to Server & localStorage
   const persistCountries = async (updated) => {
     setCountriesList(updated);
     try {
@@ -1002,19 +1009,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     } catch {}
     try {
       const apiRes = await adminApi.request('save_settings', { key: 'portal_countries', value: updated });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_settings')
-          .upsert({
-            key: 'portal_countries',
-            value: updated,
-            updated_at: new Date().toISOString()
-          });
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در ذخیره کشورها در دیتابیس');
     } catch (err) {
-      console.error('Error saving countries to Supabase:', err);
-      triggerToast('خطا در ذخیره کشورها در دیتابیس', 'error');
+      console.error('Error saving countries:', err);
+      triggerToast('خطا در ذخیره کشورها: ' + err.message, 'error');
     }
   };
 
@@ -1383,23 +1381,21 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const updateAdCountry = async (adId, newCountry) => {
     playFeedback('click');
     const prevActive = activeAds;
+    const prevRecent = recentActiveAds;
+    const prevSelected = selectedAdForModal;
     setActiveAds(prev => prev.map(a => a.id === adId ? { ...a, country: newCountry } : a));
     setRecentActiveAds(prev => prev.map(a => a.id === adId ? { ...a, country: newCountry } : a));
     setSelectedAdForModal(prev => prev && prev.id === adId ? { ...prev, country: newCountry } : prev);
     try {
       const apiRes = await adminApi.request('update_country', { id: adId, country: newCountry });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_ads')
-          .update({ country: newCountry })
-          .eq('id', adId);
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در تغییر کشور آگهی');
       const countryObj = COUNTRIES.find(c => c.id === newCountry) || COUNTRIES[0];
       triggerToast(`کشور آگهی به ${countryObj.nameFa} تغییر یافت.`);
       if (onRefreshAds) onRefreshAds();
     } catch (err) {
       setActiveAds(prevActive);
+      setRecentActiveAds(prevRecent);
+      setSelectedAdForModal(prevSelected);
       triggerToast('خطا در تغییر کشور آگهی: ' + err.message, 'error');
     }
   };
@@ -1409,6 +1405,11 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     playFeedback('vip');
     const nextVal = !ad.is_featured;
     const adCountry = ad.country || 'se';
+    const prevActive = activeAds;
+    const prevRecent = recentActiveAds;
+    const prevSelected = selectedAdForModal;
+    const prevCounts = counts;
+    const prevCountryStats = countryStats;
     setActiveAds(prev => prev.map(a => a.id === ad.id ? { ...a, is_featured: nextVal } : a));
     setRecentActiveAds(prev => prev.map(a => a.id === ad.id ? { ...a, is_featured: nextVal } : a));
     setSelectedAdForModal(prev => prev && prev.id === ad.id ? { ...prev, is_featured: nextVal } : prev);
@@ -1425,16 +1426,15 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     });
     try {
       const apiRes = await adminApi.request('toggle_featured', { id: ad.id, is_featured: nextVal });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_ads')
-          .update({ is_featured: nextVal })
-          .eq('id', ad.id);
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در تغییر وضعیت ویژه');
       triggerToast(nextVal ? 'آگهی به وضعیت ویژه (VIP) ارتقا یافت.' : 'نشان ویژه حذف شد.');
       if (onRefreshAds) onRefreshAds();
     } catch (err) {
+      setActiveAds(prevActive);
+      setRecentActiveAds(prevRecent);
+      setSelectedAdForModal(prevSelected);
+      setCounts(prevCounts);
+      setCountryStats(prevCountryStats);
       triggerToast('خطا در تغییر وضعیت ویژه: ' + err.message, 'error');
     }
   };
@@ -1449,14 +1449,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const dismissReportAdmin = async (reportId) => {
     try {
       const apiRes = await adminApi.request('dismiss_report', { reportId });
-      if (!apiRes || !apiRes.ok) {
-        const nextList = adReports.filter(r => String(r.id) !== String(reportId));
-        await supabase.from('swedpersiska_settings').upsert({
-          key: 'ad_reports',
-          value: nextList,
-          updated_at: new Date().toISOString()
-        });
-      }
+      assertAdminApiResponse(apiRes, 'خطا در بستن گزارش');
       setAdReports(prev => prev.filter(r => String(r.id) !== String(reportId)));
       triggerToast('گزارش بسته شد.');
     } catch (err) {
@@ -1551,6 +1544,14 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     setSavingCleanupSettings(true);
     try {
       const apiRes = await adminApi.request('save_cleanup_settings', { settings: nextSettings });
+      if (apiRes && (apiRes.status === 401 || apiRes.unauthorized)) {
+        const msg = apiRes.error || 'نشست مدیریتی منقضی شده است. لطفاً مجدداً وارد شوید.';
+        adminApi.setToken('');
+        setIsAuthenticated(false);
+        setLoginError(msg);
+        triggerToast(msg, 'error');
+        return { ok: false, error: msg, fieldErrors: {} };
+      }
       if (!apiRes) {
         const msg = 'ارتباط با سرور ادمین برقرار نشد یا توکن معتبر نیست.';
         triggerToast(msg, 'error');
@@ -1584,13 +1585,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     playFeedback('vip');
     try {
       const apiRes = await adminApi.request('update_status', { id: adId, status: 'active' });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_ads')
-          .update({ status: 'active', updated_at: new Date().toISOString() })
-          .eq('id', adId);
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در تایید آگهی');
       setActiveAds(prev =>
         adStatusFilter === 'pending'
           ? prev.filter(a => a.id !== adId)
@@ -1617,13 +1612,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     playFeedback('delete');
     try {
       const apiRes = await adminApi.request('delete_ad', { id });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_ads')
-          .delete()
-          .eq('id', id);
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در حذف آگهی');
       setActiveAds(prev => prev.filter(a => a.id !== id));
       setRecentActiveAds(prev => prev.filter(a => a.id !== id));
       setCounts(prev => ({
@@ -1701,16 +1690,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       };
 
       const apiRes = await adminApi.request('save_settings', { key: 'site_branding', value: payload });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_settings')
-          .upsert({
-            key: 'site_branding',
-            value: payload,
-            updated_at: new Date().toISOString()
-          });
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در ذخیره تنظیمات برند');
       const msg = 'مشخصات برند و لینک‌های فوتر با موفقیت ذخیره شد!';
       setSaveSuccessMsg(msg);
       triggerToast(msg, 'success');
@@ -1729,16 +1709,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     try {
       await persistCountries(countriesList);
       const apiRes = await adminApi.request('save_settings', { key: 'seo_settings', value: seoSettings });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_settings')
-          .upsert({
-            key: 'seo_settings',
-            value: seoSettings,
-            updated_at: new Date().toISOString()
-          });
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در ذخیره سئو');
       const countryObj = countriesList.find(c => c.id === seoActiveCountry) || countriesList[0];
       const msg = `تنظیمات سئو و پس‌زمینه کشور ${countryObj.nameFa} با موفقیت ذخیره شد!`;
       setSaveSuccessMsg(msg);
@@ -1763,16 +1734,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     setSavingSettings(true);
     try {
       const apiRes = await adminApi.request('save_settings', { key: 'analytics_settings', value: payload });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_settings')
-          .upsert({
-            key: 'analytics_settings',
-            value: payload,
-            updated_at: new Date().toISOString()
-          });
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در ذخیره تنظیمات آنالیتیکس');
       const msg = 'تنظیمات گوگل آنالیتیکس با موفقیت ذخیره شد!';
       setSaveSuccessMsg(msg);
       triggerToast(msg, 'success');
@@ -1801,16 +1763,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         secretAccessKey: r2Settings.secretAccessKey.trim()
       };
       const apiRes = await adminApi.request('save_settings', { key: 'r2_settings', value: payload });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_settings')
-          .upsert({
-            key: 'r2_settings',
-            value: payload,
-            updated_at: new Date().toISOString()
-          });
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در ذخیره تنظیمات فضای ابری');
       setR2Settings(prev => ({
         ...prev,
         hasCredentials: prev.hasCredentials || Boolean(payload.accessKeyId && payload.secretAccessKey),
@@ -1843,16 +1796,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         vipBadgeText: stripeSettings.vipBadgeText || 'ویژه (VIP)'
       };
       const apiRes = await adminApi.request('save_settings', { key: 'stripe_settings', value: publicStripePayload });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_settings')
-          .upsert({
-            key: 'stripe_settings',
-            value: publicStripePayload,
-            updated_at: new Date().toISOString()
-          });
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در ذخیره تنظیمات درگاه پرداخت');
       const msg = 'تنظیمات درگاه پرداخت و تعرفه ویژه (VIP) با موفقیت ذخیره شد!';
       setSaveSuccessMsg(msg);
       triggerToast(msg, 'success');
@@ -1917,16 +1861,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       };
 
       const apiRes = await adminApi.request('save_settings', { key: 'podcast_settings', value: payload });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_settings')
-          .upsert({
-            key: 'podcast_settings',
-            value: payload,
-            updated_at: new Date().toISOString()
-          });
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در ذخیره تنظیمات پادکست خبری');
 
       setPodcastSettings(payload);
       const msg = 'تنظیمات پادکست خبری و لینک یوتیوب با موفقیت ذخیره شد!';
@@ -1951,16 +1886,11 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         storeId: dep.storeId || '',
         workerName: dep.workerName || '',
       });
-      if (apiRes && apiRes.ok && Array.isArray(apiRes.seller_deployments)) {
+      assertAdminApiResponse(apiRes, 'خطا در حذف اشتراک');
+      if (Array.isArray(apiRes.seller_deployments)) {
         setSellerDeployments(apiRes.seller_deployments);
       } else {
-        const nextList = sellerDeployments.filter(d => (d.storeId || d.workerName) !== keyId);
-        await supabase.from('swedpersiska_settings').upsert({
-          key: 'seller_deployments',
-          value: nextList,
-          updated_at: new Date().toISOString(),
-        });
-        setSellerDeployments(nextList);
+        setSellerDeployments(prev => prev.filter(d => (d.storeId || d.workerName) !== keyId));
       }
       if (editingSubId === keyId) setEditingSubId('');
       triggerToast(`اشتراک «${dep.name}» با موفقیت حذف شد.`, 'success');
@@ -2187,16 +2117,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       };
       localStorage.setItem('swedpersiska_turnstile_settings', JSON.stringify(publicTurnstilePayload));
       const apiRes = await adminApi.request('save_settings', { key: 'turnstile_settings', value: publicTurnstilePayload });
-      if (!apiRes || !apiRes.ok) {
-        const { error } = await supabase
-          .from('swedpersiska_settings')
-          .upsert({
-            key: 'turnstile_settings',
-            value: publicTurnstilePayload,
-            updated_at: new Date().toISOString()
-          });
-        if (error) throw error;
-      }
+      assertAdminApiResponse(apiRes, 'خطا در ذخیره تنظیمات آنتی‌بات');
       const msg = 'تنظیمات امنیتی و آنتی‌بات کلودفلر با موفقیت ذخیره شد!';
       setSaveSuccessMsg(msg);
       triggerToast(msg, 'success');
@@ -3009,6 +2930,18 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             3. CONTENT CANVAS (Persian RTL)
         ======================================================== */}
         <div className="flex-1 flex flex-col min-w-0" dir="rtl">
+
+          {!hasServiceRoleConfig && (
+            <div className="mb-4 p-4 rounded-2xl border border-amber-300 bg-amber-50 text-xs text-amber-950 font-semibold flex items-start gap-2.5 shadow-2xs">
+              <AlertCircle size={18} className="text-amber-700 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <span className="font-black block">متغیر امنیتی SUPABASE_SERVICE_ROLE_KEY روی سرور ادمین (Vercel) تنظیم نشده است</span>
+                <p className="text-[11.5px] text-amber-900 leading-relaxed">
+                  به دلیل فعال بودن قوانین امنیتی دیتابیس (RLS)، ذخیره تنظیمات سایت، تایید/حذف آگهی و مدیریت پاکسازی فقط از طریق سرور ادمین با کلید <code className="px-1 py-0.5 rounded bg-amber-100 font-mono text-[10.5px]">SUPABASE_SERVICE_ROLE_KEY</code> امکان‌پذیر است. لطفاً در پنل Vercel این متغیر را از بخش <span className="font-bold">Supabase → Project Settings → API → service_role (secret)</span> اضافه کرده و دوباره Deploy کنید.
+                </p>
+              </div>
+            </div>
+          )}
           
           {/* ========================================================
               TAB 1: CLEAN, FAST, UNCLUTTERED OVERVIEW DASHBOARD
@@ -3926,15 +3859,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           ======================================================== */}
           {activeTab === 'lifecycle' && (
             <div className="space-y-4 w-full max-w-5xl mx-auto">
-              {!hasServiceRoleConfig && (
-                <div className="p-4 rounded-2xl border border-amber-300 bg-amber-50 text-xs text-amber-950 font-semibold flex items-start gap-2.5">
-                  <AlertCircle size={18} className="text-amber-700 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-black block">متغیر امنیتی SUPABASE_SERVICE_ROLE_KEY روی سرور ادمین تنظیم نشده است</span>
-                    <span className="text-[11px] text-amber-900">برای مشاهده صف بررسی تکرار، اجرای پاکسازی دستی و ذخیره تنظیمات، مقدار SUPABASE_SERVICE_ROLE_KEY را در تنظیمات محیطی Vercel اضافه کنید.</span>
-                  </div>
-                </div>
-              )}
 
               {/* Sub-Navigation Pills */}
               <div className="flex flex-wrap items-center justify-between gap-2">

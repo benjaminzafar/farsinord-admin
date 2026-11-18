@@ -506,7 +506,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ads: enriched, count: count ?? 0, page });
     }
 
-    if (!HAS_SERVICE_ROLE && ['toggle_featured', 'update_status', 'update_country', 'delete_ad', 'dismiss_report', 'save_settings', 'save_cleanup_settings', 'resolve_duplicate_review', 'run_cleanup_now'].includes(action)) {
+    if (!HAS_SERVICE_ROLE && ['toggle_featured', 'update_status', 'update_country', 'delete_ad', 'dismiss_report', 'save_settings', 'save_cleanup_settings', 'resolve_duplicate_review', 'run_cleanup_now', 'update_website_subscription', 'generate_website_invoice_link', 'delete_website_subscription'].includes(action)) {
       return res.status(503).json({
         ok: false,
         error: 'متغیر امنیتی SUPABASE_SERVICE_ROLE_KEY روی سرور ادمین (Vercel) تنظیم نشده است.',

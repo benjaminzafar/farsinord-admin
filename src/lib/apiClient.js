@@ -91,7 +91,12 @@ export const adminApi = {
   async request(action, payload = {}) {
     const token = this.getToken();
     if (!token || token.startsWith('local.')) {
-      return null;
+      return {
+        ok: false,
+        status: 401,
+        unauthorized: true,
+        error: 'نشست مدیریتی معتبر نیست. لطفاً مجدداً وارد شوید.',
+      };
     }
     try {
       const res = await fetch(`${API_BASE}/api/admin`, {
@@ -106,7 +111,21 @@ export const adminApi = {
       if (contentType.includes('application/json')) {
         const json = await res.json();
         if (json && json.ok) return json;
-        if (json && json.error) return { ok: false, status: res.status, error: json.error };
+        return {
+          ...(json && typeof json === 'object' ? json : {}),
+          ok: false,
+          status: res.status,
+          unauthorized: res.status === 401,
+          error: json?.error || `خطای سرور ادمین (کد ${res.status})`,
+        };
+      }
+      if (!res.ok) {
+        return {
+          ok: false,
+          status: res.status,
+          unauthorized: res.status === 401,
+          error: `خطای سرور ادمین (کد ${res.status})`,
+        };
       }
     } catch {}
     return null;
