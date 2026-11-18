@@ -1831,6 +1831,32 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   };
 
+  // Extend 30-day Monthly Subscription (260 SEK/month)
+  const handleRenewSellerDeployment = async (dep) => {
+    if (!dep?.workerName) return;
+    try {
+      const baseTime = dep.expiresAt && new Date(dep.expiresAt).getTime() > Date.now()
+        ? new Date(dep.expiresAt).getTime()
+        : Date.now();
+      const nextExpiresAt = new Date(baseTime + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const nextList = sellerDeployments.map((d) =>
+        d.workerName === dep.workerName ? { ...d, expiresAt: nextExpiresAt, monthlyPrice: 260 } : d
+      );
+      const apiRes = await adminApi.request('save_settings', { key: 'seller_deployments', value: nextList });
+      if (!apiRes || !apiRes.ok) {
+        await supabase.from('swedpersiska_settings').upsert({
+          key: 'seller_deployments',
+          value: nextList,
+          updated_at: new Date().toISOString(),
+        });
+      }
+      setSellerDeployments(nextList);
+      triggerToast(`اشتراک ۳۰ روزه «${dep.name}» تمدید شد.`, 'success');
+    } catch (err) {
+      triggerToast('خطا در تمدید اشتراک: ' + err.message, 'error');
+    }
+  };
+
   // Save Cloudflare Turnstile Anti-Bot Settings (never persists secretKey to public settings table)
   const saveTurnstileSettings = async (e) => {
     if (e) e.preventDefault();
@@ -4142,7 +4168,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   <div>
                     <h3 className="text-sm font-black text-zinc-900">اتصال کلودفلر ادمین برای ساخت وب‌سایت مشتریان</h3>
                     <p className="text-xs text-stone-500 mt-0.5">
-                      توکن کلودفلر خود را اینجا وارد کنید تا کاربران پس از پرداخت ۲۴۰ کرون بدون نیاز به ورود به کلودفلر، سایتشان را بسازند.
+                      توکن کلودفلر خود را اینجا وارد کنید تا کاربران پس از پرداخت ۲۶۰ کرون ماهانه بدون نیاز به ورود به کلودفلر، سایتشان را بسازند.
                     </p>
                   </div>
                   <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
@@ -4197,7 +4223,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       وب‌سایت‌ها و فروشگاه‌های ساخته‌شده ({sellerDeployments.length})
                     </h3>
                     <p className="text-xs text-stone-500 mt-0.5">
-                      اشتراک ۲۴۰ کرون ماهانه • مشاهده نام سایت، شماره تماس، شماره ثبت شرکت، ایمیل و حذف از کلودفلر در صورت عدم پرداخت.
+                      اشتراک ماهانه ۲۶۰ کرون (اعتبار ۳۰ روزه، غیر دائمی) • مشاهده مشخصات شرکت، تمدید ماهانه و حذف از کلودفلر در صورت عدم پرداخت.
                     </p>
                   </div>
                 </div>
@@ -4208,12 +4234,25 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   </div>
                 ) : (
                   <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/80 overflow-hidden">
-                    {sellerDeployments.map((dep) => (
+                    {sellerDeployments.map((dep) => {
+                      const expTime = dep.expiresAt
+                        ? new Date(dep.expiresAt).getTime()
+                        : (dep.createdAt ? new Date(dep.createdAt).getTime() + 30 * 24 * 60 * 60 * 1000 : Date.now());
+                      const isExpired = expTime < Date.now();
+                      const expLabel = new Date(expTime).toLocaleDateString('fa-IR');
+                      return (
                       <div key={dep.workerName} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
                         <div className="min-w-0 space-y-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs font-black text-zinc-900">{dep.name}</span>
                             <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-stone-200/70 text-stone-700">{dep.storeId}</span>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                              isExpired
+                                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            }`}>
+                              {isExpired ? `منقضی (${expLabel})` : `فعال تا ${expLabel} • ۲۶۰ کرون/ماه`}
+                            </span>
                             {dep.companyNumber && (
                               <span className="text-[10.5px] font-bold text-stone-600">ثبت شرکت: <span className="font-mono">{dep.companyNumber}</span></span>
                             )}
@@ -4236,6 +4275,13 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                         <div className="flex items-center gap-2 shrink-0">
                           <button
                             type="button"
+                            onClick={() => handleRenewSellerDeployment(dep)}
+                            className="h-8 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
+                          >
+                            <span>تمدید ۳۰ روز</span>
+                          </button>
+                          <button
+                            type="button"
                             disabled={deletingDeployment === dep.workerName}
                             onClick={() => handleDeleteSellerDeployment(dep)}
                             className="h-8 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
@@ -4245,7 +4291,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
