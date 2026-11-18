@@ -4882,45 +4882,51 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           {activeTab === 'settings' && (
             <div className="space-y-4 w-full py-1">
               {/* Sub-Navigation Pills */}
-              <div className="p-1.5 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.03)] flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+              <div className="p-1.5 rounded-2xl border border-stone-200/80 bg-white flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => { playFeedback('click'); setSettingsSubTab('general'); }}
-                  className={`flex-1 sm:flex-initial min-h-[38px] px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
+                  onClick={() => { playFeedback('click'); setSettingsSubTab('general'); setSaveSuccessMsg(''); }}
+                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
                     settingsSubTab === 'general'
-                      ? 'bg-slate-900 text-white shadow-sm'
+                      ? 'bg-slate-900 text-white'
                       : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
                   }`}
                 >
-                  <SlidersHorizontal size={14} className={settingsSubTab === 'general' ? 'text-purple-300' : 'text-stone-400'} />
-                  <span>مشخصات برند و فوتر</span>
+                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
+                    <SlidersHorizontal size={14} strokeWidth={2} className="block" />
+                  </span>
+                  <span className="leading-none">مشخصات برند و فوتر</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => { playFeedback('click'); setSettingsSubTab('seo'); }}
-                  className={`flex-1 sm:flex-initial min-h-[38px] px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
+                  onClick={() => { playFeedback('click'); setSettingsSubTab('seo'); setSaveSuccessMsg(''); }}
+                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
                     settingsSubTab === 'seo'
-                      ? 'bg-slate-900 text-white shadow-sm'
+                      ? 'bg-slate-900 text-white'
                       : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
                   }`}
                 >
-                  <Globe2 size={14} className={settingsSubTab === 'seo' ? 'text-blue-300' : 'text-stone-400'} />
-                  <span>کشورها، پس‌زمینه و سئو</span>
+                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
+                    <Globe2 size={14} strokeWidth={2} className="block" />
+                  </span>
+                  <span className="leading-none">کشورها، پس‌زمینه و سئو</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => { playFeedback('click'); setSettingsSubTab('monetization'); }}
-                  className={`flex-1 sm:flex-initial min-h-[38px] px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
+                  onClick={() => { playFeedback('click'); setSettingsSubTab('monetization'); setSaveSuccessMsg(''); }}
+                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
                     settingsSubTab === 'monetization'
-                      ? 'bg-slate-900 text-white shadow-sm'
+                      ? 'bg-slate-900 text-white'
                       : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
                   }`}
                 >
-                  <WalletCards size={14} className={settingsSubTab === 'monetization' ? 'text-amber-300' : 'text-stone-400'} />
-                  <span>درگاه پرداخت و تعرفه</span>
-                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
+                    <WalletCards size={14} strokeWidth={2} className="block" />
+                  </span>
+                  <span className="leading-none">درگاه پرداخت و تعرفه</span>
+                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none ${
                     settingsSubTab === 'monetization'
                       ? 'bg-white/15 text-amber-200'
                       : 'bg-amber-50 text-amber-700 border border-amber-200/70'
@@ -4931,16 +4937,18 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                 <button
                   type="button"
-                  onClick={() => { playFeedback('click'); setSettingsSubTab('security'); }}
-                  className={`flex-1 sm:flex-initial min-h-[38px] px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
+                  onClick={() => { playFeedback('click'); setSettingsSubTab('security'); setSaveSuccessMsg(''); }}
+                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
                     settingsSubTab === 'security'
-                      ? 'bg-slate-900 text-white shadow-sm'
+                      ? 'bg-slate-900 text-white'
                       : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
                   }`}
                 >
-                  <ShieldCheck size={14} className={settingsSubTab === 'security' ? 'text-cyan-300' : 'text-stone-400'} />
-                  <span>امنیت سیستم</span>
-                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
+                    <ShieldCheck size={14} strokeWidth={2} className="block" />
+                  </span>
+                  <span className="leading-none">امنیت سیستم</span>
+                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none ${
                     turnstileSettings.enabled
                       ? (settingsSubTab === 'security' ? 'bg-emerald-500/30 text-emerald-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70')
                       : (settingsSubTab === 'security' ? 'bg-white/15 text-stone-300' : 'bg-stone-100 text-stone-500')
@@ -4951,16 +4959,18 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                 <button
                   type="button"
-                  onClick={() => { playFeedback('click'); setSettingsSubTab('podcast'); }}
-                  className={`flex-1 sm:flex-initial min-h-[38px] px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
+                  onClick={() => { playFeedback('click'); setSettingsSubTab('podcast'); setSaveSuccessMsg(''); }}
+                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
                     settingsSubTab === 'podcast'
-                      ? 'bg-slate-900 text-white shadow-sm'
+                      ? 'bg-slate-900 text-white'
                       : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
                   }`}
                 >
-                  <Headphones size={14} className={settingsSubTab === 'podcast' ? 'text-rose-300' : 'text-stone-400'} />
-                  <span>پادکست خبری و یوتیوب</span>
-                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
+                    <Headphones size={14} strokeWidth={2} className="block" />
+                  </span>
+                  <span className="leading-none">پادکست خبری و یوتیوب</span>
+                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none ${
                     podcastSettings.youtubeChannelUrl || (podcastSettings.manualVideos || []).length > 0
                       ? (settingsSubTab === 'podcast' ? 'bg-rose-500/30 text-rose-200' : 'bg-rose-50 text-rose-700 border border-rose-200/70')
                       : (settingsSubTab === 'podcast' ? 'bg-white/15 text-stone-300' : 'bg-stone-100 text-stone-500')
@@ -5277,127 +5287,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 <button
                   type="submit"
                   disabled={savingSettings}
-                  className="h-10 px-6 rounded-xl bg-slate-900 hover:bg-black disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 shadow-2xs active:scale-[0.98] transition-all cursor-pointer"
+                  className="h-10 px-6 rounded-xl bg-slate-900 hover:bg-black disabled:opacity-50 text-white font-bold text-xs inline-flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                 >
                   <Save size={15} />
                   <span>{savingSettings ? 'در حال ذخیره‌سازی...' : 'ذخیره تنظیمات'}</span>
                 </button>
               </form>
-
-              {/* Owner Cloudflare API Token for Website Builder */}
-              <form onSubmit={saveCloudflareDeploySettings} className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div>
-                    <h3 className="text-xs font-extrabold text-zinc-900">اتصال کلودفلر ادمین برای ساخت وب‌سایت مشتریان</h3>
-                    <p className="text-[11px] text-stone-500 mt-0.5">
-                      توکن کلودفلر خود را اینجا وارد کنید تا کاربران پس از پرداخت ۲۴۰ کرون بدون نیاز به ورود به کلودفلر، سایتشان را بسازند.
-                    </p>
-                  </div>
-                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                    cfDeploySettings.hasToken
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : 'bg-amber-50 text-amber-700 border-amber-200'
-                  }`}>
-                    {cfDeploySettings.hasToken ? 'توکن ثبت شده' : 'نیاز به ثبت توکن'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">توکن کلودفلر (API Token)</label>
-                    <input
-                      type="password"
-                      dir="ltr"
-                      value={cfDeploySettings.apiToken}
-                      onChange={(e) => setCfDeploySettings(prev => ({ ...prev, apiToken: e.target.value }))}
-                      placeholder={cfDeploySettings.hasToken ? 'ثبت شده (برای تغییر وارد کنید)' : 'Workers Scripts:Edit + D1:Edit'}
-                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs font-mono text-left"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">شناسه حساب کلودفلر (اختیاری - Account ID)</label>
-                    <input
-                      type="text"
-                      dir="ltr"
-                      value={cfDeploySettings.accountId}
-                      onChange={(e) => setCfDeploySettings(prev => ({ ...prev, accountId: e.target.value }))}
-                      placeholder="در صورت خالی بودن خودکار تشخیص داده می‌شود"
-                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs font-mono text-left"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={savingSettings}
-                  className="h-9 px-5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs inline-flex items-center gap-2 cursor-pointer"
-                >
-                  <Save size={14} />
-                  <span>ذخیره توکن کلودفلر</span>
-                </button>
-              </form>
-
-              {/* Deployed Seller Panels (Cloudflare Workers + D1 Control) */}
-              <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div>
-                    <h3 className="text-xs font-extrabold text-zinc-900">
-                      وب‌سایت‌ها و فروشگاه‌های ساخته‌شده ({sellerDeployments.length})
-                    </h3>
-                    <p className="text-[11px] text-stone-500 mt-0.5">
-                      اشتراک ۲۴۰ کرون ماهانه • مشاهده مشخصات شرکت و حذف سایت از کلودفلر در صورت عدم پرداخت.
-                    </p>
-                  </div>
-                </div>
-
-                {sellerDeployments.length === 0 ? (
-                  <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/70 text-center text-xs text-stone-400">
-                    هنوز هیچ وب‌سایت یا فروشگاهی توسط کاربران ساخته نشده است.
-                  </div>
-                ) : (
-                  <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/80 overflow-hidden">
-                    {sellerDeployments.map((dep) => (
-                      <div key={dep.workerName} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
-                        <div className="min-w-0 space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-black text-zinc-900">{dep.name}</span>
-                            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-stone-200/70 text-stone-700">{dep.storeId}</span>
-                            {dep.companyNumber && (
-                              <span className="text-[10.5px] font-bold text-stone-600">ثبت شرکت: <span className="font-mono">{dep.companyNumber}</span></span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 flex-wrap text-[11px] text-stone-500">
-                            {dep.phone && <span dir="ltr" className="font-mono">{dep.phone}</span>}
-                            {dep.email && <span dir="ltr" className="font-mono">{dep.email}</span>}
-                          </div>
-                          <a
-                            href={dep.panelUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[11px] font-mono text-[#0066CC] hover:underline truncate block"
-                            dir="ltr"
-                          >
-                            {dep.panelUrl}
-                          </a>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button
-                            type="button"
-                            disabled={deletingDeployment === dep.workerName}
-                            onClick={() => handleDeleteSellerDeployment(dep)}
-                            className="h-8 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                          >
-                            <Trash2 size={13} />
-                            <span>{deletingDeployment === dep.workerName ? 'در حال حذف...' : 'حذف از کلودفلر'}</span>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
             </div>
               )}
 
@@ -5540,127 +5435,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 <button
                   type="submit"
                   disabled={savingSettings}
-                  className="h-10 px-6 rounded-xl bg-slate-900 hover:bg-black disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 shadow-2xs active:scale-[0.98] transition-all cursor-pointer"
+                  className="h-10 px-6 rounded-xl bg-slate-900 hover:bg-black disabled:opacity-50 text-white font-bold text-xs inline-flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                 >
                   <Save size={15} />
                   <span>{savingSettings ? 'در حال ذخیره‌سازی...' : 'ذخیره تنظیمات'}</span>
                 </button>
               </form>
-
-              {/* Owner Cloudflare API Token for Website Builder */}
-              <form onSubmit={saveCloudflareDeploySettings} className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div>
-                    <h3 className="text-xs font-extrabold text-zinc-900">اتصال کلودفلر ادمین برای ساخت وب‌سایت مشتریان</h3>
-                    <p className="text-[11px] text-stone-500 mt-0.5">
-                      توکن کلودفلر خود را اینجا وارد کنید تا کاربران پس از پرداخت ۲۴۰ کرون بدون نیاز به ورود به کلودفلر، سایتشان را بسازند.
-                    </p>
-                  </div>
-                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                    cfDeploySettings.hasToken
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : 'bg-amber-50 text-amber-700 border-amber-200'
-                  }`}>
-                    {cfDeploySettings.hasToken ? 'توکن ثبت شده' : 'نیاز به ثبت توکن'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">توکن کلودفلر (API Token)</label>
-                    <input
-                      type="password"
-                      dir="ltr"
-                      value={cfDeploySettings.apiToken}
-                      onChange={(e) => setCfDeploySettings(prev => ({ ...prev, apiToken: e.target.value }))}
-                      placeholder={cfDeploySettings.hasToken ? 'ثبت شده (برای تغییر وارد کنید)' : 'Workers Scripts:Edit + D1:Edit'}
-                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs font-mono text-left"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">شناسه حساب کلودفلر (اختیاری - Account ID)</label>
-                    <input
-                      type="text"
-                      dir="ltr"
-                      value={cfDeploySettings.accountId}
-                      onChange={(e) => setCfDeploySettings(prev => ({ ...prev, accountId: e.target.value }))}
-                      placeholder="در صورت خالی بودن خودکار تشخیص داده می‌شود"
-                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs font-mono text-left"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={savingSettings}
-                  className="h-9 px-5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs inline-flex items-center gap-2 cursor-pointer"
-                >
-                  <Save size={14} />
-                  <span>ذخیره توکن کلودفلر</span>
-                </button>
-              </form>
-
-              {/* Deployed Seller Panels (Cloudflare Workers + D1 Control) */}
-              <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div>
-                    <h3 className="text-xs font-extrabold text-zinc-900">
-                      وب‌سایت‌ها و فروشگاه‌های ساخته‌شده ({sellerDeployments.length})
-                    </h3>
-                    <p className="text-[11px] text-stone-500 mt-0.5">
-                      اشتراک ۲۴۰ کرون ماهانه • مشاهده مشخصات شرکت و حذف سایت از کلودفلر در صورت عدم پرداخت.
-                    </p>
-                  </div>
-                </div>
-
-                {sellerDeployments.length === 0 ? (
-                  <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/70 text-center text-xs text-stone-400">
-                    هنوز هیچ وب‌سایت یا فروشگاهی توسط کاربران ساخته نشده است.
-                  </div>
-                ) : (
-                  <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/80 overflow-hidden">
-                    {sellerDeployments.map((dep) => (
-                      <div key={dep.workerName} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
-                        <div className="min-w-0 space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-black text-zinc-900">{dep.name}</span>
-                            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-stone-200/70 text-stone-700">{dep.storeId}</span>
-                            {dep.companyNumber && (
-                              <span className="text-[10.5px] font-bold text-stone-600">ثبت شرکت: <span className="font-mono">{dep.companyNumber}</span></span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 flex-wrap text-[11px] text-stone-500">
-                            {dep.phone && <span dir="ltr" className="font-mono">{dep.phone}</span>}
-                            {dep.email && <span dir="ltr" className="font-mono">{dep.email}</span>}
-                          </div>
-                          <a
-                            href={dep.panelUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[11px] font-mono text-[#0066CC] hover:underline truncate block"
-                            dir="ltr"
-                          >
-                            {dep.panelUrl}
-                          </a>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button
-                            type="button"
-                            disabled={deletingDeployment === dep.workerName}
-                            onClick={() => handleDeleteSellerDeployment(dep)}
-                            className="h-8 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                          >
-                            <Trash2 size={13} />
-                            <span>{deletingDeployment === dep.workerName ? 'در حال حذف...' : 'حذف از کلودفلر'}</span>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
             </div>
               )}
 
