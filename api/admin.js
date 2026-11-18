@@ -170,7 +170,11 @@ export default async function handler(req, res) {
         se: { total: 0, active: 0, vip: 0, views: 0 },
         no: { total: 0, active: 0, vip: 0, views: 0 },
         dk: { total: 0, active: 0, vip: 0, views: 0 },
-        fi: { total: 0, active: 0, vip: 0, views: 0 }
+        fi: { total: 0, active: 0, vip: 0, views: 0 },
+        de: { total: 0, active: 0, vip: 0, views: 0 },
+        at: { total: 0, active: 0, vip: 0, views: 0 },
+        nl: { total: 0, active: 0, vip: 0, views: 0 },
+        fr: { total: 0, active: 0, vip: 0, views: 0 }
       };
       const categoryCounts = {};
       let totalViews = 0;
