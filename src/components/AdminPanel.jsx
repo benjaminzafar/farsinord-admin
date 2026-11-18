@@ -5415,6 +5415,28 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                 <button
                   type="button"
+                  onClick={() => { playFeedback('click'); setSettingsSubTab('r2'); setSaveSuccessMsg(''); }}
+                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
+                    settingsSubTab === 'r2'
+                      ? 'bg-slate-900 text-white'
+                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
+                  }`}
+                >
+                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
+                    <ImageIcon size={14} strokeWidth={2} className="block" />
+                  </span>
+                  <span className="leading-none">فضای ابری R2</span>
+                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none ${
+                    r2Settings.enabled
+                      ? (settingsSubTab === 'r2' ? 'bg-emerald-500/30 text-emerald-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70')
+                      : (settingsSubTab === 'r2' ? 'bg-white/15 text-stone-300' : 'bg-stone-100 text-stone-500')
+                  }`}>
+                    {r2Settings.enabled ? 'فعال' : 'غیرفعال'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => {
                     playFeedback('click');
                     setSettingsSubTab('cleanup');
@@ -6761,20 +6783,41 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 </form>
               </div>
 
+            </div>
+              )}
+
+              {settingsSubTab === 'r2' && (
+            <div className="space-y-6 w-full py-2 animate-in fade-in duration-150 ease-out">
+              <div className="border-b border-stone-200/80 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-black text-zinc-900">فضای ابری تصاویر (Cloudflare R2)</h2>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    تمامی تصاویر آگهی‌ها، لوگو و پس‌زمینه‌ها مستقیماً در Cloudflare R2 ذخیره و هنگام حذف آگهی از همان‌جا پاک می‌شوند (بدون استفاده از Storage سوپابیس).
+                  </p>
+                </div>
+                <span className={`self-start sm:self-auto px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                  r2Settings.enabled
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-stone-100 text-stone-600 border-stone-200'
+                }`}>
+                  {r2Settings.enabled ? 'فعال در کلودفلر R2' : 'غیرفعال'}
+                </span>
+              </div>
+
+              {saveSuccessMsg && (
+                <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs font-bold flex items-center gap-2">
+                  <CheckCircle size={16} className="text-emerald-600" />
+                  <span>{saveSuccessMsg}</span>
+                </div>
+              )}
+
               {/* Cloudflare R2 Object Storage Card */}
               <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
-                    <h3 className="text-xs font-extrabold text-zinc-900">فضای ابری تصاویر (کلودفلر R2)</h3>
+                    <h3 className="text-xs font-extrabold text-zinc-900">تنظیمات اتصال به سطل R2</h3>
                     <p className="text-[11px] text-stone-500 mt-0.5">حداکثر ۴ تصویر برای هر آگهی • حداکثر ۱ مگابایت برای هر تصویر</p>
                   </div>
-                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                    r2Settings.enabled
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : 'bg-stone-100 text-stone-500 border-stone-200'
-                  }`}>
-                    {r2Settings.enabled ? 'فعال' : 'غیرفعال'}
-                  </span>
                 </div>
 
                 <form onSubmit={saveR2Settings} className="space-y-4">
@@ -6867,7 +6910,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   </div>
                 </form>
               </div>
-
             </div>
               )}
 
