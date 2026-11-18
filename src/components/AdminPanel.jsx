@@ -278,7 +278,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   });
   const [activeTab, setActiveTab] = useState(() => {
     try {
-      const validTabs = ['overview', 'ads', 'categories', 'settings'];
+      const validTabs = ['overview', 'ads', 'websites', 'categories', 'settings', 'reports'];
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
       if (tabParam === 'monetization' || tabParam === 'security') {
@@ -2240,6 +2240,13 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 onClick: () => handleTabChange('reports'),
               },
               {
+                id: 'websites',
+                label: 'وب‌سایت‌ها و فروشگاه‌ها',
+                badge: sellerDeployments.length,
+                active: activeTab === 'websites',
+                onClick: () => handleTabChange('websites'),
+              },
+              {
                 id: 'categories',
                 label: 'دسته‌بندی و شهرها',
                 active: activeTab === 'categories',
@@ -2383,6 +2390,13 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 onClick: () => handleTabChange('reports'),
               },
               {
+                id: 'websites',
+                label: 'وب‌سایت‌ها و فروشگاه‌ها',
+                badge: sellerDeployments.length,
+                active: activeTab === 'websites',
+                onClick: () => handleTabChange('websites'),
+              },
+              {
                 id: 'categories',
                 label: 'دسته‌بندی و شهرها',
                 active: activeTab === 'categories',
@@ -2462,6 +2476,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               {activeTab === 'overview' && 'داشبورد مدیریت'}
               {activeTab === 'ads' && (vipOnlyFilter ? 'آگهی‌های ویژه' : adStatusFilter === 'pending' ? 'در انتظار تایید' : 'مدیریت آگهی‌ها')}
               {activeTab === 'reports' && 'گزارش‌های تخلف'}
+              {activeTab === 'websites' && 'وب‌سایت‌ها و فروشگاه‌ها'}
               {activeTab === 'categories' && 'دسته‌بندی و شهرها'}
               {activeTab === 'settings' && 'تنظیمات سایت'}
             </span>
@@ -2522,6 +2537,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               {activeTab === 'overview' && 'داشبورد مدیریت'}
               {activeTab === 'ads' && 'مدیریت آگهی‌ها'}
               {activeTab === 'reports' && 'گزارش‌های تخلف'}
+              {activeTab === 'websites' && 'وب‌سایت‌ها و فروشگاه‌ها'}
               {activeTab === 'categories' && 'دسته‌بندی و شهرها'}
               {activeTab === 'settings' && 'تنظیمات سایت'}
             </span>
@@ -4112,6 +4128,127 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 </div>
               )}
 
+            </div>
+          )}
+
+          {/* ========================================================
+              TAB: WEBSITES & SELLER PANELS (CLOUDFLARE + D1)
+          ======================================================== */}
+          {activeTab === 'websites' && (
+            <div className="space-y-5 w-full py-1 animate-in fade-in duration-150 ease-out">
+              {/* Owner Cloudflare API Token for Website Builder */}
+              <form onSubmit={saveCloudflareDeploySettings} className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h3 className="text-sm font-black text-zinc-900">اتصال کلودفلر ادمین برای ساخت وب‌سایت مشتریان</h3>
+                    <p className="text-xs text-stone-500 mt-0.5">
+                      توکن کلودفلر خود را اینجا وارد کنید تا کاربران پس از پرداخت ۲۴۰ کرون بدون نیاز به ورود به کلودفلر، سایتشان را بسازند.
+                    </p>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                    cfDeploySettings.hasToken
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}>
+                    {cfDeploySettings.hasToken ? 'توکن ثبت شده' : 'نیاز به ثبت توکن'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">توکن کلودفلر (API Token)</label>
+                    <input
+                      type="password"
+                      dir="ltr"
+                      value={cfDeploySettings.apiToken}
+                      onChange={(e) => setCfDeploySettings(prev => ({ ...prev, apiToken: e.target.value }))}
+                      placeholder={cfDeploySettings.hasToken ? 'ثبت شده (برای تغییر وارد کنید)' : 'Workers Scripts:Edit + D1:Edit'}
+                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs font-mono text-left"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">شناسه حساب کلودفلر (اختیاری - Account ID)</label>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={cfDeploySettings.accountId}
+                      onChange={(e) => setCfDeploySettings(prev => ({ ...prev, accountId: e.target.value }))}
+                      placeholder="در صورت خالی بودن خودکار تشخیص داده می‌شود"
+                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs font-mono text-left"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={savingSettings}
+                  className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs inline-flex items-center gap-2 cursor-pointer"
+                >
+                  <Save size={14} />
+                  <span>ذخیره توکن کلودفلر</span>
+                </button>
+              </form>
+
+              {/* Deployed Seller Panels (Cloudflare Workers + D1 Control) */}
+              <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h3 className="text-sm font-black text-zinc-900">
+                      وب‌سایت‌ها و فروشگاه‌های ساخته‌شده ({sellerDeployments.length})
+                    </h3>
+                    <p className="text-xs text-stone-500 mt-0.5">
+                      اشتراک ۲۴۰ کرون ماهانه • مشاهده نام سایت، شماره تماس، شماره ثبت شرکت، ایمیل و حذف از کلودفلر در صورت عدم پرداخت.
+                    </p>
+                  </div>
+                </div>
+
+                {sellerDeployments.length === 0 ? (
+                  <div className="p-6 rounded-xl bg-stone-50 border border-stone-200/70 text-center text-xs text-stone-400">
+                    هنوز هیچ وب‌سایت یا فروشگاهی توسط کاربران ساخته نشده است.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/80 overflow-hidden">
+                    {sellerDeployments.map((dep) => (
+                      <div key={dep.workerName} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black text-zinc-900">{dep.name}</span>
+                            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-stone-200/70 text-stone-700">{dep.storeId}</span>
+                            {dep.companyNumber && (
+                              <span className="text-[10.5px] font-bold text-stone-600">ثبت شرکت: <span className="font-mono">{dep.companyNumber}</span></span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 flex-wrap text-[11px] text-stone-500">
+                            {dep.phone && <span dir="ltr" className="font-mono">{dep.phone}</span>}
+                            {dep.email && <span dir="ltr" className="font-mono">{dep.email}</span>}
+                          </div>
+                          <a
+                            href={dep.panelUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] font-mono text-[#0066CC] hover:underline truncate block"
+                            dir="ltr"
+                          >
+                            {dep.panelUrl}
+                          </a>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            disabled={deletingDeployment === dep.workerName}
+                            onClick={() => handleDeleteSellerDeployment(dep)}
+                            className="h-8 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <Trash2 size={13} />
+                            <span>{deletingDeployment === dep.workerName ? 'در حال حذف...' : 'حذف از کلودفلر'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
