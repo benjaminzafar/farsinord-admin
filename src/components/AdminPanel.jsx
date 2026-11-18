@@ -552,6 +552,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [newPodcastVideoTitle, setNewPodcastVideoTitle] = useState('');
   const [sellerDeployments, setSellerDeployments] = useState([]);
   const [deletingDeployment, setDeletingDeployment] = useState('');
+  const [cfDeploySettings, setCfDeploySettings] = useState({
+    apiToken: '',
+    accountId: '',
+    deployUrl: 'https://linksho-seller.vercel.app/api/cloudflare/deploy',
+    hasToken: false
+  });
 
   const [adminTurnstileToken, setAdminTurnstileToken] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
@@ -648,6 +654,15 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       }
       if (item.key === 'seller_deployments' && Array.isArray(item.value)) {
         setSellerDeployments(item.value);
+      }
+      if (item.key === 'cloudflare_deploy_settings' && item.value) {
+        setCfDeploySettings(prev => ({
+          ...prev,
+          accountId: item.value.accountId || '',
+          deployUrl: item.value.deployUrl || 'https://linksho-seller.vercel.app/api/cloudflare/deploy',
+          hasToken: Boolean(item.value.hasToken || item.value.apiToken),
+          apiToken: ''
+        }));
       }
       if (item.key === 'portal_categories' && item.value && Array.isArray(item.value) && item.value.length > 0) {
         setCategoriesList(item.value);
@@ -1743,25 +1758,71 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   };
 
+  // Save Admin Cloudflare Token & Account ID for 1-Click Seller Website Builder
+  const saveCloudflareDeploySettings = async (e) => {
+    e.preventDefault();
+    setSavingSettings(true);
+    try {
+      const payload = {
+        accountId: (cfDeploySettings.accountId || '').trim(),
+        deployUrl: (cfDeploySettings.deployUrl || 'https://linksho-seller.vercel.app/api/cloudflare/deploy').trim(),
+        apiToken: (cfDeploySettings.apiToken || '').trim(),
+      };
+      const apiRes = await adminApi.request('save_settings', { key: 'cloudflare_deploy_settings', value: payload });
+      if (!apiRes || !apiRes.ok) {
+        const { data: existingCf } = await supabase
+          .from('swedpersiska_settings')
+          .select('value')
+          .eq('key', 'cloudflare_deploy_settings')
+          .maybeSingle();
+        const prevCf = (existingCf && existingCf.value) || {};
+        const { error } = await supabase.from('swedpersiska_settings').upsert({
+          key: 'cloudflare_deploy_settings',
+          value: {
+            accountId: payload.accountId,
+            deployUrl: payload.deployUrl,
+            apiToken: payload.apiToken || prevCf.apiToken || '',
+          },
+          updated_at: new Date().toISOString(),
+        });
+        if (error) throw error;
+      }
+      setCfDeploySettings(prev => ({
+        ...prev,
+        hasToken: prev.hasToken || Boolean(payload.apiToken),
+        apiToken: '',
+      }));
+      const msg = 'توکن کلودفلر برای ساخت وب‌سایت مشتریان با موفقیت ذخیره شد!';
+      setSaveSuccessMsg(msg);
+      triggerToast(msg, 'success');
+      setTimeout(() => setSaveSuccessMsg(''), 3500);
+    } catch (err) {
+      triggerToast('خطا در ذخیره توکن کلودفلر: ' + err.message, 'error');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
   // Delete / Terminate a Seller Panel Worker & D1 Database on Cloudflare (e.g., if unpaid)
   const handleDeleteSellerDeployment = async (dep) => {
     if (!dep?.workerName) return;
     setDeletingDeployment(dep.workerName);
     try {
-      const deployBase = import.meta.env?.VITE_SELLER_DEPLOY_URL || 'https://linksho-seller.vercel.app/api/cloudflare/deploy';
-      const delUrl = `${deployBase}?workerName=${encodeURIComponent(dep.workerName)}&dbId=${encodeURIComponent(dep.dbId || '')}`;
-      await fetch(delUrl, { method: 'DELETE' }).catch(() => {});
-
-      const nextList = sellerDeployments.filter(d => d.workerName !== dep.workerName);
-      const apiRes = await adminApi.request('save_settings', { key: 'seller_deployments', value: nextList });
-      if (!apiRes || !apiRes.ok) {
+      const apiRes = await adminApi.request('delete_seller_deployment', {
+        workerName: dep.workerName,
+        dbId: dep.dbId || '',
+      });
+      if (apiRes && apiRes.ok && Array.isArray(apiRes.seller_deployments)) {
+        setSellerDeployments(apiRes.seller_deployments);
+      } else {
+        const nextList = sellerDeployments.filter(d => d.workerName !== dep.workerName);
         await supabase.from('swedpersiska_settings').upsert({
           key: 'seller_deployments',
           value: nextList,
           updated_at: new Date().toISOString(),
         });
+        setSellerDeployments(nextList);
       }
-      setSellerDeployments(nextList);
       triggerToast(`پنل فروش «${dep.name}» از کلودفلر حذف شد.`, 'success');
     } catch (err) {
       triggerToast('خطا در حذف پنل فروش: ' + err.message, 'error');
@@ -4462,34 +4523,91 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 </button>
               </form>
 
+              {/* Owner Cloudflare API Token for Website Builder */}
+              <form onSubmit={saveCloudflareDeploySettings} className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-zinc-900">اتصال کلودفلر ادمین برای ساخت وب‌سایت مشتریان</h3>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      توکن کلودفلر خود را اینجا وارد کنید تا کاربران پس از پرداخت ۲۴۰ کرون بدون نیاز به ورود به کلودفلر، سایتشان را بسازند.
+                    </p>
+                  </div>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                    cfDeploySettings.hasToken
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}>
+                    {cfDeploySettings.hasToken ? 'توکن ثبت شده' : 'نیاز به ثبت توکن'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">توکن کلودفلر (API Token)</label>
+                    <input
+                      type="password"
+                      dir="ltr"
+                      value={cfDeploySettings.apiToken}
+                      onChange={(e) => setCfDeploySettings(prev => ({ ...prev, apiToken: e.target.value }))}
+                      placeholder={cfDeploySettings.hasToken ? 'ثبت شده (برای تغییر وارد کنید)' : 'Workers Scripts:Edit + D1:Edit'}
+                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs font-mono text-left"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">شناسه حساب کلودفلر (اختیاری - Account ID)</label>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={cfDeploySettings.accountId}
+                      onChange={(e) => setCfDeploySettings(prev => ({ ...prev, accountId: e.target.value }))}
+                      placeholder="در صورت خالی بودن خودکار تشخیص داده می‌شود"
+                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs font-mono text-left"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={savingSettings}
+                  className="h-9 px-5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs inline-flex items-center gap-2 cursor-pointer"
+                >
+                  <Save size={14} />
+                  <span>ذخیره توکن کلودفلر</span>
+                </button>
+              </form>
+
               {/* Deployed Seller Panels (Cloudflare Workers + D1 Control) */}
               <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
                     <h3 className="text-xs font-extrabold text-zinc-900">
-                      وب‌سایت‌ها و پنل‌های فروش ساخته‌شده ({sellerDeployments.length})
+                      وب‌سایت‌ها و فروشگاه‌های ساخته‌شده ({sellerDeployments.length})
                     </h3>
                     <p className="text-[11px] text-stone-500 mt-0.5">
-                      اشتراک ۲۴۰ کرون ماهانه • در صورت عدم پرداخت می‌توانید پنل و دیتابیس کلودفلر مشتری را با ۱ کلیک حذف کنید.
+                      اشتراک ۲۴۰ کرون ماهانه • مشاهده مشخصات شرکت و حذف سایت از کلودفلر در صورت عدم پرداخت.
                     </p>
                   </div>
                 </div>
 
                 {sellerDeployments.length === 0 ? (
                   <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/70 text-center text-xs text-stone-400">
-                    هنوز هیچ پنل فروشی توسط کاربران ساخته نشده است.
+                    هنوز هیچ وب‌سایت یا فروشگاهی توسط کاربران ساخته نشده است.
                   </div>
                 ) : (
                   <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/80 overflow-hidden">
                     {sellerDeployments.map((dep) => (
-                      <div key={dep.workerName} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
-                        <div className="min-w-0 space-y-0.5">
+                      <div key={dep.workerName} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
+                        <div className="min-w-0 space-y-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs font-black text-zinc-900">{dep.name}</span>
-                            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold">
-                              {dep.type === 'restaurant' ? 'رستوران' : 'فروشگاه'}
-                            </span>
-                            <span className="font-mono text-[10px] text-stone-500">{dep.storeId}</span>
+                            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-stone-200/70 text-stone-700">{dep.storeId}</span>
+                            {dep.companyNumber && (
+                              <span className="text-[10.5px] font-bold text-stone-600">ثبت شرکت: <span className="font-mono">{dep.companyNumber}</span></span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 flex-wrap text-[11px] text-stone-500">
+                            {dep.phone && <span dir="ltr" className="font-mono">{dep.phone}</span>}
+                            {dep.email && <span dir="ltr" className="font-mono">{dep.email}</span>}
                           </div>
                           <a
                             href={dep.panelUrl}
@@ -4668,34 +4786,91 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 </button>
               </form>
 
+              {/* Owner Cloudflare API Token for Website Builder */}
+              <form onSubmit={saveCloudflareDeploySettings} className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-zinc-900">اتصال کلودفلر ادمین برای ساخت وب‌سایت مشتریان</h3>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      توکن کلودفلر خود را اینجا وارد کنید تا کاربران پس از پرداخت ۲۴۰ کرون بدون نیاز به ورود به کلودفلر، سایتشان را بسازند.
+                    </p>
+                  </div>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                    cfDeploySettings.hasToken
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}>
+                    {cfDeploySettings.hasToken ? 'توکن ثبت شده' : 'نیاز به ثبت توکن'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">توکن کلودفلر (API Token)</label>
+                    <input
+                      type="password"
+                      dir="ltr"
+                      value={cfDeploySettings.apiToken}
+                      onChange={(e) => setCfDeploySettings(prev => ({ ...prev, apiToken: e.target.value }))}
+                      placeholder={cfDeploySettings.hasToken ? 'ثبت شده (برای تغییر وارد کنید)' : 'Workers Scripts:Edit + D1:Edit'}
+                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs font-mono text-left"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-stone-700 mb-1.5">شناسه حساب کلودفلر (اختیاری - Account ID)</label>
+                    <input
+                      type="text"
+                      dir="ltr"
+                      value={cfDeploySettings.accountId}
+                      onChange={(e) => setCfDeploySettings(prev => ({ ...prev, accountId: e.target.value }))}
+                      placeholder="در صورت خالی بودن خودکار تشخیص داده می‌شود"
+                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs font-mono text-left"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={savingSettings}
+                  className="h-9 px-5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs inline-flex items-center gap-2 cursor-pointer"
+                >
+                  <Save size={14} />
+                  <span>ذخیره توکن کلودفلر</span>
+                </button>
+              </form>
+
               {/* Deployed Seller Panels (Cloudflare Workers + D1 Control) */}
               <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div>
                     <h3 className="text-xs font-extrabold text-zinc-900">
-                      وب‌سایت‌ها و پنل‌های فروش ساخته‌شده ({sellerDeployments.length})
+                      وب‌سایت‌ها و فروشگاه‌های ساخته‌شده ({sellerDeployments.length})
                     </h3>
                     <p className="text-[11px] text-stone-500 mt-0.5">
-                      اشتراک ۲۴۰ کرون ماهانه • در صورت عدم پرداخت می‌توانید پنل و دیتابیس کلودفلر مشتری را با ۱ کلیک حذف کنید.
+                      اشتراک ۲۴۰ کرون ماهانه • مشاهده مشخصات شرکت و حذف سایت از کلودفلر در صورت عدم پرداخت.
                     </p>
                   </div>
                 </div>
 
                 {sellerDeployments.length === 0 ? (
                   <div className="p-4 rounded-xl bg-stone-50 border border-stone-200/70 text-center text-xs text-stone-400">
-                    هنوز هیچ پنل فروشی توسط کاربران ساخته نشده است.
+                    هنوز هیچ وب‌سایت یا فروشگاهی توسط کاربران ساخته نشده است.
                   </div>
                 ) : (
                   <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/80 overflow-hidden">
                     {sellerDeployments.map((dep) => (
-                      <div key={dep.workerName} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
-                        <div className="min-w-0 space-y-0.5">
+                      <div key={dep.workerName} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
+                        <div className="min-w-0 space-y-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs font-black text-zinc-900">{dep.name}</span>
-                            <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold">
-                              {dep.type === 'restaurant' ? 'رستوران' : 'فروشگاه'}
-                            </span>
-                            <span className="font-mono text-[10px] text-stone-500">{dep.storeId}</span>
+                            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-stone-200/70 text-stone-700">{dep.storeId}</span>
+                            {dep.companyNumber && (
+                              <span className="text-[10.5px] font-bold text-stone-600">ثبت شرکت: <span className="font-mono">{dep.companyNumber}</span></span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 flex-wrap text-[11px] text-stone-500">
+                            {dep.phone && <span dir="ltr" className="font-mono">{dep.phone}</span>}
+                            {dep.email && <span dir="ltr" className="font-mono">{dep.email}</span>}
                           </div>
                           <a
                             href={dep.panelUrl}

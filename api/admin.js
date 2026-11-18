@@ -234,6 +234,16 @@ export default async function handler(req, res) {
         recentActiveAds: firstPageAds.slice(0, 5),
         initialActiveAds: firstPageAds,
         settings: (settingsRes.data || []).map((item) => {
+          if (item.key === 'cloudflare_deploy_settings' && item.value && typeof item.value === 'object') {
+            return {
+              ...item,
+              value: {
+                accountId: item.value.accountId || '',
+                deployUrl: item.value.deployUrl || 'https://linksho-seller.vercel.app/api/cloudflare/deploy',
+                hasToken: Boolean(item.value.apiToken),
+              }
+            };
+          }
           if (item.key === 'r2_settings' && item.value && typeof item.value === 'object') {
             return {
               ...item,
@@ -425,11 +435,24 @@ export default async function handler(req, res) {
 
     if (action === 'save_settings') {
       const { key, value } = body;
-      const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'portal_countries', 'stripe_settings', 'turnstile_settings', 'analytics_settings', 'r2_settings', 'podcast_settings', 'seller_deployments'];
+      const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'portal_countries', 'stripe_settings', 'turnstile_settings', 'analytics_settings', 'r2_settings', 'podcast_settings', 'seller_deployments', 'cloudflare_deploy_settings'];
       if (!allowedKeys.includes(key)) {
         return res.status(400).json({ ok: false, error: 'Invalid settings key' });
       }
       let nextValue = value;
+      if (key === 'cloudflare_deploy_settings' && value && typeof value === 'object') {
+        const { data: existingCf } = await supabase
+          .from('swedpersiska_settings')
+          .select('value')
+          .eq('key', 'cloudflare_deploy_settings')
+          .maybeSingle();
+        const prevCf = (existingCf && existingCf.value) || {};
+        nextValue = {
+          accountId: String(value.accountId || '').trim(),
+          deployUrl: String(value.deployUrl || 'https://linksho-seller.vercel.app/api/cloudflare/deploy').trim(),
+          apiToken: (value.apiToken && String(value.apiToken).trim()) || prevCf.apiToken || '',
+        };
+      }
       if (key === 'r2_settings' && value && typeof value === 'object') {
         const { data: existingRow } = await supabase
           .from('swedpersiska_settings')
@@ -453,6 +476,60 @@ export default async function handler(req, res) {
       });
       if (error) throw error;
       return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'delete_seller_deployment') {
+      const workerName = String(body.workerName || '').trim();
+      const dbId = String(body.dbId || '').trim();
+      if (!workerName) {
+        return res.status(400).json({ ok: false, error: 'Missing workerName' });
+      }
+
+      const { data: cfRow } = await supabase
+        .from('swedpersiska_settings')
+        .select('value')
+        .eq('key', 'cloudflare_deploy_settings')
+        .maybeSingle();
+      const cfCfg = (cfRow && cfRow.value) || {};
+      const cfToken = String(cfCfg.apiToken || process.env.CLOUDFLARE_API_TOKEN || '').trim();
+      let accountId = String(cfCfg.accountId || process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+
+      if (cfToken) {
+        if (!accountId) {
+          const accRes = await fetch('https://api.cloudflare.com/client/v4/accounts?per_page=5', {
+            headers: { Authorization: `Bearer ${cfToken}` },
+          });
+          const accJson = await accRes.json().catch(() => ({}));
+          accountId = accJson?.result?.[0]?.id || '';
+        }
+        if (accountId) {
+          await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${encodeURIComponent(workerName)}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${cfToken}` },
+          }).catch(() => {});
+          if (dbId) {
+            await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${encodeURIComponent(dbId)}`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${cfToken}` },
+            }).catch(() => {});
+          }
+        }
+      }
+
+      const { data: depRow } = await supabase
+        .from('swedpersiska_settings')
+        .select('value')
+        .eq('key', 'seller_deployments')
+        .maybeSingle();
+      const prevList = Array.isArray(depRow?.value) ? depRow.value : [];
+      const nextList = prevList.filter((x) => x.workerName !== workerName);
+      await supabase.from('swedpersiska_settings').upsert({
+        key: 'seller_deployments',
+        value: nextList,
+        updated_at: new Date().toISOString(),
+      });
+
+      return res.status(200).json({ ok: true, seller_deployments: nextList });
     }
 
     return res.status(400).json({ ok: false, error: 'Unknown admin action' });
