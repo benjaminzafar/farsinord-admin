@@ -135,7 +135,7 @@ function PaginationBar({ currentPage, totalCount, pageSize, onPageChange, loadin
   );
 }
 
-// Real vector SVG flags for the 4 Nordic Scandinavian countries (flawless on Windows & all OS)
+// Real vector SVG flags for all supported countries (flawless on Windows & all OS)
 const NORDIC_FLAGS = {
   se: (
     <svg className="w-5 h-3.5 rounded-[3px] shadow-2xs shrink-0 overflow-hidden" viewBox="0 0 16 10" aria-label="پرچم سوئد">
@@ -161,13 +161,59 @@ const NORDIC_FLAGS = {
     </svg>
   ),
   fi: (
-    <svg className="w-5 h-3.5 rounded-[3px] shadow-2xs shrink-0 overflow-hidden" viewBox="0 0 18 11" aria-label="پرچم فنلاند">
+    <svg className="w-5 h-3.5 rounded-[3px] shadow-2xs shrink-0 overflow-hidden border border-stone-200/70" viewBox="0 0 18 11" aria-label="پرچم فنلاند">
       <rect width="18" height="11" fill="#fff" />
       <rect width="3" height="11" x="5" fill="#003580" />
       <rect width="18" height="3" y="4" fill="#003580" />
     </svg>
   ),
+  de: (
+    <svg className="w-5 h-3.5 rounded-[3px] shadow-2xs shrink-0 overflow-hidden" viewBox="0 0 15 9" aria-label="پرچم آلمان">
+      <rect width="15" height="3" y="0" fill="#000000" />
+      <rect width="15" height="3" y="3" fill="#DD0000" />
+      <rect width="15" height="3" y="6" fill="#FFCE00" />
+    </svg>
+  ),
+  at: (
+    <svg className="w-5 h-3.5 rounded-[3px] shadow-2xs shrink-0 overflow-hidden border border-stone-200/70" viewBox="0 0 15 9" aria-label="پرچم اتریش">
+      <rect width="15" height="3" y="0" fill="#ED2939" />
+      <rect width="15" height="3" y="3" fill="#FFFFFF" />
+      <rect width="15" height="3" y="6" fill="#ED2939" />
+    </svg>
+  ),
+  nl: (
+    <svg className="w-5 h-3.5 rounded-[3px] shadow-2xs shrink-0 overflow-hidden border border-stone-200/70" viewBox="0 0 15 9" aria-label="پرچم هلند">
+      <rect width="15" height="3" y="0" fill="#AE1C28" />
+      <rect width="15" height="3" y="3" fill="#FFFFFF" />
+      <rect width="15" height="3" y="6" fill="#21468B" />
+    </svg>
+  ),
+  fr: (
+    <svg className="w-5 h-3.5 rounded-[3px] shadow-2xs shrink-0 overflow-hidden border border-stone-200/70" viewBox="0 0 15 10" aria-label="پرچم فرانسه">
+      <rect width="5" height="10" x="0" fill="#002395" />
+      <rect width="5" height="10" x="5" fill="#FFFFFF" />
+      <rect width="5" height="10" x="10" fill="#ED2939" />
+    </svg>
+  ),
+  ca: (
+    <svg className="w-5 h-3.5 rounded-[3px] shadow-2xs shrink-0 overflow-hidden border border-stone-200/70" viewBox="0 0 16 10" aria-label="پرچم کانادا">
+      <rect width="4" height="10" x="0" fill="#FF0000" />
+      <rect width="8" height="10" x="4" fill="#FFFFFF" />
+      <rect width="4" height="10" x="12" fill="#FF0000" />
+      <path d="M8 2.2 L8.7 4 L10.2 3.6 L9.3 5.2 L10.5 5.8 L8.5 6.1 L8.5 7.8 L7.5 7.8 L7.5 6.1 L5.5 5.8 L6.7 5.2 L5.8 3.6 L7.3 4 Z" fill="#FF0000" />
+    </svg>
+  ),
 };
+
+function renderCountryFlag(id) {
+  const code = String(id || 'se').toLowerCase();
+  if (NORDIC_FLAGS[code]) return NORDIC_FLAGS[code];
+  return (
+    <span className="inline-flex items-center justify-center w-5 h-3.5 rounded-[3px] bg-stone-200 text-stone-700 font-mono text-[8px] font-black uppercase shrink-0">
+      {code.slice(0, 2)}
+    </span>
+  );
+}
 
 // Category Icon Mapping
 const CATEGORY_ICON_MAP = {
@@ -585,10 +631,13 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         } catch {}
       }
       if (item.key === 'portal_cities' && item.value && typeof item.value === 'object' && !Array.isArray(item.value)) {
-        setCitiesByCountry(item.value);
-        try {
-          localStorage.setItem('swedpersiska_portal_cities', JSON.stringify(item.value));
-        } catch {}
+        setCitiesByCountry(prev => {
+          const mergedCities = { ...prev, ...item.value };
+          try {
+            localStorage.setItem('swedpersiska_portal_cities', JSON.stringify(mergedCities));
+          } catch {}
+          return mergedCities;
+        });
       }
     });
   };
@@ -2404,22 +2453,22 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
               </div>
 
-              {/* 2. ROW 2: NORDIC REGIONAL BREAKDOWN (4 Scandinavian Countries) */}
+              {/* 2. ROW 2: REGIONAL BREAKDOWN (All Countries) */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-black text-zinc-900">
-                      پوشش منطقه‌ای اسکاندیناوی
+                      پوشش کشورها
                     </h3>
                     <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-stone-200/70 text-stone-700">
-                      ۴ کشور نوردیک
+                      {countriesList.length} کشور
                     </span>
                   </div>
                   <span className="text-xs text-stone-500">برای فیلتر کردن آگهی‌های هر کشور کلیک کنید</span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {COUNTRIES.map(country => {
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {countriesList.map(country => {
                     const stats = getCountryStats(country.id);
                     return (
                       <div 
@@ -2429,7 +2478,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2.5 min-w-0">
-                            {NORDIC_FLAGS[country.id]}
+                            {renderCountryFlag(country.id)}
                             <span className="font-extrabold text-[14px] text-stone-900 group-hover:text-blue-600 transition-colors truncate">
                               {country.nameFa}
                             </span>
@@ -2490,7 +2539,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   {/* Ads List */}
                   <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/70 overflow-hidden">
                     {recentActiveAds.map(ad => {
-                      const countryObj = COUNTRIES.find(c => c.id === (ad.country || 'se')) || COUNTRIES[0];
+                      const countryObj = countriesList.find(c => c.id === (ad.country || 'se')) || countriesList[0];
                       const catObj = categoriesList.find(c => c.id === ad.category) || CATEGORIES.find(c => c.id === ad.category);
                       return (
                         <div
@@ -2513,7 +2562,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-blue-50 text-blue-700 border border-blue-200/80 whitespace-nowrap shrink-0">
-                                  {NORDIC_FLAGS[ad.country || 'se']}
+                                  {renderCountryFlag(ad.country || 'se')}
                                   <span>{countryObj.nameFa}</span>
                                 </span>
                                 {ad.is_featured && (
@@ -2745,7 +2794,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       همه ({counts.active})
                     </button>
 
-                    {COUNTRIES.map(country => {
+                    {countriesList.map(country => {
                       const count = countryStats[country.id]?.active || 0;
                       const isSelected = countryFilter === country.id;
 
@@ -2764,7 +2813,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                               : 'text-stone-600 hover:text-zinc-950 hover:bg-white/50'
                           }`}
                         >
-                          {NORDIC_FLAGS[country.id]}
+                          {renderCountryFlag(country.id)}
                           <span>{country.nameFa}</span>
                           <span className={`text-[10.5px] font-mono ${isSelected ? 'text-blue-600' : 'opacity-60'}`}>
                             ({count})
@@ -2853,7 +2902,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     {/* Mobile Cards View (< md) */}
                     <div className="md:hidden divide-y divide-stone-100">
                       {activeAds.map(ad => {
-                        const countryObj = COUNTRIES.find(c => c.id === (ad.country || 'se')) || COUNTRIES[0];
+                        const countryObj = countriesList.find(c => c.id === (ad.country || 'se')) || countriesList[0];
                         const catObj = categoriesList.find(c => c.id === ad.category) || CATEGORIES.find(c => c.id === ad.category);
                         return (
                           <div key={`m-${ad.id}`} className="p-3.5 space-y-3 hover:bg-blue-50/30 transition-colors">
@@ -2873,7 +2922,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                               <div className="min-w-0 flex-1 space-y-1.5">
                                 <div className="flex items-center flex-wrap gap-1.5">
                                   <span className="px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-blue-50 text-blue-700 border border-blue-200/70 inline-flex items-center gap-1 whitespace-nowrap">
-                                    {NORDIC_FLAGS[ad.country || 'se']}
+                                    {renderCountryFlag(ad.country || 'se')}
                                     <span>{countryObj.nameFa}</span>
                                   </span>
                                   {ad.is_featured && (
@@ -2972,7 +3021,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       </thead>
                       <tbody className="divide-y divide-stone-100 text-xs">
                         {activeAds.map(ad => {
-                          const countryObj = COUNTRIES.find(c => c.id === (ad.country || 'se')) || COUNTRIES[0];
+                          const countryObj = countriesList.find(c => c.id === (ad.country || 'se')) || countriesList[0];
                           const catObj = categoriesList.find(c => c.id === ad.category) || CATEGORIES.find(c => c.id === ad.category);
 
                           return (
@@ -3001,7 +3050,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                               {/* 2. Country */}
                               <td className="py-2.5 px-3 text-center align-middle">
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-blue-50 text-blue-700 border border-blue-200/70 whitespace-nowrap">
-                                  {NORDIC_FLAGS[ad.country || 'se']}
+                                  {renderCountryFlag(ad.country || 'se')}
                                   <span>{countryObj.nameFa}</span>
                                 </span>
                               </td>
@@ -3681,7 +3730,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                 isSelected ? 'bg-white text-zinc-950 shadow-xs' : 'text-stone-600 hover:text-zinc-950 hover:bg-white/50'
                               }`}
                             >
-                              {NORDIC_FLAGS[c.id]}
+                              {renderCountryFlag(c.id)}
                               <span>{c.nameFa}</span>
                               <span className={`text-[10.5px] font-mono ${isSelected ? 'text-blue-600' : 'opacity-60'}`}>
                                 ({list.length})
@@ -3726,7 +3775,13 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                   {/* Cities List (Mobile Cards + Desktop Table) */}
                   {(() => {
-                    const currentCities = (citiesByCountry[cityCountryFilter] || []).filter(city => {
+                    const fallbackCountryCities = (countriesList.find(c => c.id === cityCountryFilter)?.cities || [])
+                      .filter(ct => ct.id !== 'all')
+                      .map(ct => ({ id: ct.id, fa: ct.fa, enabled: true, isSystem: true }));
+                    const rawCountryCities = Array.isArray(citiesByCountry[cityCountryFilter]) && citiesByCountry[cityCountryFilter].length > 0
+                      ? citiesByCountry[cityCountryFilter]
+                      : fallbackCountryCities;
+                    const currentCities = rawCountryCities.filter(city => {
                       const q = citySearchQuery.trim().toLowerCase();
                       if (!q) return true;
                       return (city.fa || '').toLowerCase().includes(q) || (city.id || '').toLowerCase().includes(q);
@@ -4558,6 +4613,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                             : 'text-stone-600 hover:text-zinc-900'
                         }`}
                       >
+                        {renderCountryFlag(c.id)}
                         <span>{c.nameFa}</span>
                         {c.enabled === false && (
                           <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300">غیرفعال</span>
@@ -4964,15 +5020,24 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                         <button
                           type="button"
-                          onClick={() =>
-                            setSeoSettings(prev => ({
-                              ...prev,
-                              [seoActiveCountry]: { ...DEFAULT_COUNTRY_SEO[seoActiveCountry] }
-                            }))
-                          }
+                            onClick={() => {
+                              const fallbackSeo = DEFAULT_COUNTRY_SEO[seoActiveCountry] || {
+                                title: `لینک شو ${cName} | نیازمندی‌ها، مسکن، کاریابی و خدمات فارسی‌زبانان در ${cName}`,
+                                description: `لینک شو — محل رشد کسب و کار فارسی‌زبانان و مرجع آگهی‌های رایگان مسکن، رستوران، کاریابی و خدمات در سراسر ${cName}.`,
+                                keywords: `لینک شو, نیازمندیهای ${cName}, فارسی زبانان ${cName}, مسکن ${cName}, کار در ${cName}`,
+                                heroHeading: `نیازمندی‌های فارسی‌زبانان ${cName}`,
+                                heroSubheading: `مسکن، رستوران، خدمات و کاریابی در سراسر ${cName}`,
+                                ogTitle: `لینک شو ${cName} | مرجع نیازمندی‌های فارسی‌زبانان در ${cName}`,
+                                ogDescription: `ثبت و جستجوی مستقیم و رایگان مسکن، کار، رستوران و خدمات در سراسر ${cName}.`
+                              };
+                              setSeoSettings(prev => ({
+                                ...prev,
+                                [seoActiveCountry]: { ...fallbackSeo }
+                              }));
+                            }}
                           className="h-9 px-3.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs transition-colors cursor-pointer"
                         >
-                          بازنشانی به سئوی استاندارد {COUNTRIES.find(c => c.id === seoActiveCountry)?.nameFa}
+                          بازنشانی به سئوی استاندارد {cName}
                         </button>
                       </div>
                     </form>
@@ -5174,8 +5239,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   <span>#</span>
                   <span>{selectedAdForModal.reference_number || selectedAdForModal.id.slice(0, 8)}</span>
                 </span>
-                <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold border border-blue-200 whitespace-nowrap">
-                  {COUNTRIES.find(c => c.id === (selectedAdForModal.country || 'se'))?.nameFa}
+                <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[11px] font-bold border border-blue-200 whitespace-nowrap inline-flex items-center gap-1">
+                  {renderCountryFlag(selectedAdForModal.country || 'se')}
+                  <span>{countriesList.find(c => c.id === (selectedAdForModal.country || 'se'))?.nameFa}</span>
                 </span>
               </div>
 
@@ -5265,7 +5331,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   <span className="text-[11px] font-bold text-stone-400 uppercase">موقعیت مکانی</span>
                   <div className="flex items-center gap-1.5 text-sm font-bold text-stone-900">
                     <MapPin size={15} className="text-blue-600" />
-                    <span>{selectedAdForModal.city || 'نامشخص'} ({COUNTRIES.find(c => c.id === (selectedAdForModal.country || 'se'))?.nameFa})</span>
+                    <span>{selectedAdForModal.city || 'نامشخص'} ({countriesList.find(c => c.id === (selectedAdForModal.country || 'se'))?.nameFa})</span>
                   </div>
                 </div>
 
@@ -5358,22 +5424,23 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
               {/* Quick Country Switcher */}
               <div className="p-3.5 rounded-2xl bg-stone-50 border border-stone-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                <span className="text-xs font-bold text-stone-600">تغییر کشور آگهی:</span>
-                <div className="grid grid-cols-2 sm:inline-flex rounded-xl border border-stone-200 bg-white p-1 gap-1">
-                  {COUNTRIES.map(c => {
+                <span className="text-xs font-bold text-stone-600 shrink-0">تغییر کشور آگهی:</span>
+                <div className="flex flex-wrap rounded-xl border border-stone-200 bg-white p-1 gap-1">
+                  {countriesList.map(c => {
                     const isCurrent = (selectedAdForModal.country || 'se') === c.id;
                     return (
                       <button
                         key={c.id}
                         type="button"
                         onClick={() => updateAdCountry(selectedAdForModal.id, c.id)}
-                        className={`px-3 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        className={`px-2.5 py-1.5 sm:py-1 rounded-lg text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 ${
                           isCurrent
                             ? 'bg-slate-900 text-white shadow-2xs'
                             : 'text-stone-600 hover:text-stone-950 hover:bg-stone-100'
                         }`}
                       >
-                        {c.nameFa}
+                        {renderCountryFlag(c.id)}
+                        <span>{c.nameFa}</span>
                       </button>
                     );
                   })}
@@ -5660,7 +5727,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     {cityModal.mode === 'add' ? 'افزودن شهر جدید' : 'ویرایش مشخصات شهر'}
                   </h3>
                   <p className="text-[11px] text-stone-500">
-                    کشور: {COUNTRIES.find(c => c.id === cityModal.countryId)?.nameFa}
+                    کشور: {countriesList.find(c => c.id === cityModal.countryId)?.nameFa}
                   </p>
                 </div>
               </div>
