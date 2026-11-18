@@ -195,14 +195,6 @@ const NORDIC_FLAGS = {
       <rect width="5" height="10" x="10" fill="#ED2939" />
     </svg>
   ),
-  ca: (
-    <svg className="w-5 h-3.5 rounded-[3px] shadow-2xs shrink-0 overflow-hidden border border-stone-200/70" viewBox="0 0 16 10" aria-label="پرچم کانادا">
-      <rect width="4" height="10" x="0" fill="#FF0000" />
-      <rect width="8" height="10" x="4" fill="#FFFFFF" />
-      <rect width="4" height="10" x="12" fill="#FF0000" />
-      <path d="M8 2.2 L8.7 4 L10.2 3.6 L9.3 5.2 L10.5 5.8 L8.5 6.1 L8.5 7.8 L7.5 7.8 L7.5 6.1 L5.5 5.8 L6.7 5.2 L5.8 3.6 L7.3 4 Z" fill="#FF0000" />
-    </svg>
-  ),
 };
 
 function renderCountryFlag(id) {
