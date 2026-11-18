@@ -379,30 +379,47 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [supportTelegram, setSupportTelegram] = useState('@SwedPersiska');
   const [supportPhone, setSupportPhone] = useState('');
 
-  // SEO Settings State (Per Country)
-  const [seoActiveCountry, setSeoActiveCountry] = useState('se');
-  const [seoSettings, setSeoSettings] = useState({
+  // SEO Settings State (Per Country — Complete & Synced with Frontend)
+  const DEFAULT_COUNTRY_SEO = {
     se: {
-      title: 'نیازمندی‌ها، مسکن و خدمات فارسی‌زبانان در سوئد | لینک شو',
-      description: 'جامع‌ترین بازارچه آنلاین فارسی‌زبانان مقیم سوئد. رهن و اجاره خانه در استکهلم و گوتنبرگ، رستوران‌ها، استخدام و مشاغل با امکان درج رایگان آگهی.',
-      keywords: 'نیازمندیهای سوئد, مسکن استکهلم, رستوران گوتنبرگ, مترجم رسمی سوئد, دارالترجمه مالمو, کار در سوئد'
+      title: 'لینک شو سوئد | نیازمندی‌ها، مسکن، کاریابی و خدمات فارسی‌زبانان در سوئد',
+      description: 'لینک شو — مرجع نیازمندی‌ها و آگهی‌های رایگان فارسی‌زبانان در سوئد (استکهلم، گوتنبرگ، مالمو، اوپسالا). اجاره مسکن، رستوران، استخدام و خدمات تخصصی.',
+      keywords: 'لینک شو, نیازمندیهای سوئد, فارسی زبانان سوئد, اجاره خانه استکهلم, کار در سوئد, رستوران ایرانی گوتنبرگ',
+      heroHeading: 'نیازمندی‌های فارسی‌زبانان سوئد',
+      heroSubheading: 'مسکن، رستوران، خدمات و کاریابی در سراسر سوئد',
+      ogTitle: 'لینک شو سوئد | مرجع نیازمندی‌های فارسی‌زبانان در سوئد',
+      ogDescription: 'ثبت و جستجوی مستقیم و رایگان مسکن، کار، رستوران و خدمات در استکهلم، گوتنبرگ و سراسر سوئد.'
     },
     no: {
-      title: 'نیازمندی‌ها، مسکن و مشاغل فارسی‌زبانان در نروژ | لینک شو',
-      description: 'پرتال اختصاصی فارسی‌زبانان مقیم نروژ. خرید و اجاره آپارتمان در اسلو و برگن، خدمات حقوقی و دارالترجمه، رستوران‌ها و سوپرمارکت‌ها.',
-      keywords: 'نیازمندیهای نروژ, مسکن اسلو, خانه در برگن, رستوران نروژ, مترجم نروژی به فارسی, کار در نروژ'
+      title: 'لینک شو نروژ | نیازمندی‌ها، مسکن، کاریابی و خدمات فارسی‌زبانان در نروژ',
+      description: 'لینک شو — مرجع نیازمندی‌ها و آگهی‌های رایگان فارسی‌زبانان در نروژ (اسلو، برگن، استاوانگر، تروندهایم). مسکن، کاریابی، رستوران و خدمات.',
+      keywords: 'لینک شو, نیازمندیهای نروژ, فارسی زبانان نروژ, اجاره خانه اسلو, کار در نروژ, خدمات ایرانی نروژ',
+      heroHeading: 'نیازمندی‌های فارسی‌زبانان نروژ',
+      heroSubheading: 'مسکن، رستوران، خدمات و کاریابی در سراسر نروژ',
+      ogTitle: 'لینک شو نروژ | مرجع نیازمندی‌های فارسی‌زبانان در نروژ',
+      ogDescription: 'ثبت و جستجوی مستقیم و رایگان مسکن، کار، رستوران و خدمات در اسلو، برگن و سراسر نروژ.'
     },
     dk: {
-      title: 'نیازمندی‌ها، مسکن و خدمات فارسی‌زبانان در دانمارک | لینک شو',
-      description: 'پرتال جامع فارسی‌زبانان مقیم دانمارک. نیازمندی‌های مسکن و اتاق در کپنهاگ و آرهوس، معرفی رستوران‌ها و سوپرمارکت‌ها و خدمات تخصصی.',
-      keywords: 'نیازمندیهای دانمارک, مسکن کپنهاگ, خانه در آرهوس, رستوران کپنهاگ, مترجم دانمارکی, صرافی دانمارک'
+      title: 'لینک شو دانمارک | نیازمندی‌ها، مسکن، کاریابی و خدمات فارسی‌زبانان در دانمارک',
+      description: 'لینک شو — مرجع نیازمندی‌ها و آگهی‌های رایگان فارسی‌زبانان در دانمارک (کپنهاگ، آرهوس، اودنسه، آلبورگ). مسکن، استخدام، رستوران و خدمات.',
+      keywords: 'لینک شو, نیازمندیهای دانمارک, فارسی زبانان دانمارک, مسکن کپنهاگ, کار در دانمارک, خدمات ایرانی کپنهاگ',
+      heroHeading: 'نیازمندی‌های فارسی‌زبانان دانمارک',
+      heroSubheading: 'مسکن، رستوران، خدمات و کاریابی در سراسر دانمارک',
+      ogTitle: 'لینک شو دانمارک | مرجع نیازمندی‌های فارسی‌زبانان در دانمارک',
+      ogDescription: 'ثبت و جستجوی مستقیم و رایگان مسکن، کار، رستوران و خدمات در کپنهاگ، آرهوس و سراسر دانمارک.'
     },
     fi: {
-      title: 'نیازمندی‌ها، مسکن و مشاغل فارسی‌زبانان در فنلاند | لینک شو',
-      description: 'سامانه آگهی‌های رایگان فارسی‌زبانان فنلاند. اجاره مسکن در هلسینکی و تامپره، استخدام، خدمات ترجمه و اقامت برای جامعه فارسی‌زبان.',
-      keywords: 'نیازمندیهای فنلاند, خانه در هلسینکی, مسکن اسپو, فارسی‌زبانان فنلاند, کار در هلسینکی, مترجم فنلاندی'
+      title: 'لینک شو فنلاند | نیازمندی‌ها، مسکن، کاریابی و خدمات فارسی‌زبانان در فنلاند',
+      description: 'لینک شو — مرجع نیازمندی‌ها و آگهی‌های رایگان فارسی‌زبانان در فنلاند (هلسینکی، اسپو، تامپره، تورکو). مسکن، کاریابی، رستوران و خدمات.',
+      keywords: 'لینک شو, نیازمندیهای فنلاند, فارسی زبانان فنلاند, مسکن هلسینکی, کار در فنلاند, خدمات ایرانی هلسینکی',
+      heroHeading: 'نیازمندی‌های فارسی‌زبانان فنلاند',
+      heroSubheading: 'مسکن، رستوران، خدمات و کاریابی در سراسر فنلاند',
+      ogTitle: 'لینک شو فنلاند | مرجع نیازمندی‌های فارسی‌زبانان در فنلاند',
+      ogDescription: 'ثبت و جستجوی مستقیم و رایگان مسکن، کار، رستوران و خدمات در هلسینکی، اسپو و سراسر فنلاند.'
     }
-  });
+  };
+  const [seoActiveCountry, setSeoActiveCountry] = useState('se');
+  const [seoSettings, setSeoSettings] = useState(DEFAULT_COUNTRY_SEO);
 
   // Stripe & VIP Monetization State
   const [stripeSettings, setStripeSettings] = useState({
@@ -481,7 +498,30 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         setSupportPhone(item.value.supportPhone || '');
       }
       if (item.key === 'seo_settings' && item.value) {
-        setSeoSettings(prev => ({ ...prev, ...item.value }));
+        const cleanText = (str) =>
+          typeof str === 'string'
+            ? str.replace(/سوئد\s*پرشیا|سوید\s*پرشیا|فارسی\s*نورد|فارسی‌نورد|SwedPersiska|Farsi\s*Nord|Faris\s*Nord/gi, 'لینک شو')
+            : str;
+        setSeoSettings(prev => {
+          const next = { ...prev };
+          ['se', 'no', 'dk', 'fi'].forEach((cid) => {
+            const incoming = item.value[cid];
+            if (incoming && typeof incoming === 'object') {
+              next[cid] = {
+                ...prev[cid],
+                ...incoming,
+                title: cleanText(incoming.title) || prev[cid].title,
+                description: cleanText(incoming.description) || prev[cid].description,
+                keywords: cleanText(incoming.keywords) || prev[cid].keywords,
+                heroHeading: cleanText(incoming.heroHeading) || prev[cid].heroHeading,
+                heroSubheading: cleanText(incoming.heroSubheading) || prev[cid].heroSubheading,
+                ogTitle: cleanText(incoming.ogTitle) || prev[cid].ogTitle,
+                ogDescription: cleanText(incoming.ogDescription) || prev[cid].ogDescription,
+              };
+            }
+          });
+          return next;
+        });
       }
       if (item.key === 'stripe_settings' && item.value) {
         setStripeSettings(prev => ({ ...prev, ...item.value }));
@@ -4215,19 +4255,24 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 </div>
               </form>
 
-              {/* Country-Specific SEO Settings */}
+              {/* Country-Specific Complete SEO Suite */}
               <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-5">
-                <div className="flex items-center justify-between pb-3 border-b border-stone-200/80">
-                  <h3 className="text-xs font-extrabold text-zinc-900">سئوی گوگل</h3>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-stone-200/80">
+                  <div>
+                    <h3 className="text-sm font-black text-zinc-900">سئوی جامع کشورها و متاتگ‌های گوگل (SEO)</h3>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      مدیریت عنوان گوگل، توضیحات متا، تیتر هیرو (H1)، کلمات کلیدی و پیش‌نمایش شبکه‌های اجتماعی به تفکیک هر کشور
+                    </p>
+                  </div>
                   
                   {/* Country Switcher Tabs */}
-                  <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200/80">
+                  <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200/80 self-start sm:self-auto">
                     {COUNTRIES.map(c => (
                       <button
                         key={c.id}
                         type="button"
                         onClick={() => setSeoActiveCountry(c.id)}
-                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                           seoActiveCountry === c.id
                             ? 'bg-slate-900 text-white shadow-2xs'
                             : 'text-stone-600 hover:text-zinc-900'
@@ -4239,72 +4284,216 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   </div>
                 </div>
 
-                <form onSubmit={saveSeoSettings} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">
-                      عنوان صفحه در نتایج جستجو
-                    </label>
-                    <input
-                      type="text"
-                      value={seoSettings[seoActiveCountry]?.title || ''}
-                      onChange={(e) => setSeoSettings(prev => ({
-                        ...prev,
-                        [seoActiveCountry]: {
-                          ...prev[seoActiveCountry],
-                          title: e.target.value
-                        }
-                      }))}
-                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
-                    />
-                  </div>
+                {/* Live Google Search Result Preview (SERP) */}
+                {(() => {
+                  const curSeo = seoSettings[seoActiveCountry] || DEFAULT_COUNTRY_SEO[seoActiveCountry];
+                  const titleLen = (curSeo?.title || '').length;
+                  const descLen = (curSeo?.description || '').length;
+                  const kwList = (curSeo?.keywords || '')
+                    .split(/[،,]/)
+                    .map(k => k.trim())
+                    .filter(Boolean);
 
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">
-                      توضیحات متاتگ (خلاصه سایت)
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={seoSettings[seoActiveCountry]?.description || ''}
-                      onChange={(e) => setSeoSettings(prev => ({
-                        ...prev,
-                        [seoActiveCountry]: {
-                          ...prev[seoActiveCountry],
-                          description: e.target.value
-                        }
-                      }))}
-                      className="w-full rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 p-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
-                    />
-                  </div>
+                  return (
+                    <form onSubmit={saveSeoSettings} className="space-y-4">
+                      {/* SERP Preview Box */}
+                      <div className="rounded-xl bg-stone-50 p-4 space-y-1.5 text-right">
+                        <div className="flex items-center justify-between text-[11px] text-stone-400">
+                          <span>پیش‌نمایش زنده در نتایج گوگل ({COUNTRIES.find(c => c.id === seoActiveCountry)?.nameFa})</span>
+                          <span className="font-mono" dir="ltr">linksho.com/?country={seoActiveCountry}</span>
+                        </div>
+                        <div className="text-sm font-bold text-[#1a0dab] truncate">
+                          {curSeo?.title || 'عنوان سئو...'}
+                        </div>
+                        <div className="text-xs text-stone-600 leading-relaxed line-clamp-2">
+                          {curSeo?.description || 'توضیحات متا در نتایج گوگل...'}
+                        </div>
+                      </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">
-                      کلمات کلیدی جستجو
-                    </label>
-                    <input
-                      type="text"
-                      value={seoSettings[seoActiveCountry]?.keywords || ''}
-                      onChange={(e) => setSeoSettings(prev => ({
-                        ...prev,
-                        [seoActiveCountry]: {
-                          ...prev[seoActiveCountry],
-                          keywords: e.target.value
-                        }
-                      }))}
-                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
-                    />
-                  </div>
+                      {/* Row 1: Meta Title */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-xs font-bold text-stone-700">
+                            عنوان صفحه در نتایج گوگل (Meta Title)
+                          </label>
+                          <span className={`text-[11px] font-semibold ${titleLen >= 40 && titleLen <= 70 ? 'text-emerald-600' : 'text-stone-400'}`}>
+                            {titleLen} کاراکتر (بهینه: ۵۰ تا ۶۵)
+                          </span>
+                        </div>
+                        <input
+                          type="text"
+                          value={curSeo?.title || ''}
+                          onChange={(e) => setSeoSettings(prev => ({
+                            ...prev,
+                            [seoActiveCountry]: {
+                              ...prev[seoActiveCountry],
+                              title: e.target.value
+                            }
+                          }))}
+                          className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all"
+                        />
+                      </div>
 
-                  <div className="pt-2">
-                    <button
-                      type="submit"
-                      disabled={savingSettings}
-                      className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs flex items-center gap-2 shadow-2xs active:scale-[0.98] transition-all cursor-pointer"
-                    >
-                      <Save size={15} />
-                      <span>ذخیره سئو</span>
-                    </button>
-                  </div>
-                </form>
+                      {/* Row 2: Meta Description */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="text-xs font-bold text-stone-700">
+                            توضیحات متاتگ گوگل (Meta Description — معرفی مختصر و حرفه‌ای)
+                          </label>
+                          <span className={`text-[11px] font-semibold ${descLen >= 110 && descLen <= 165 ? 'text-emerald-600' : 'text-stone-400'}`}>
+                            {descLen} کاراکتر (بهینه: ۱۲۰ تا ۱۶۰)
+                          </span>
+                        </div>
+                        <textarea
+                          rows={3}
+                          value={curSeo?.description || ''}
+                          onChange={(e) => setSeoSettings(prev => ({
+                            ...prev,
+                            [seoActiveCountry]: {
+                              ...prev[seoActiveCountry],
+                              description: e.target.value
+                            }
+                          }))}
+                          className="w-full rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 p-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all leading-relaxed"
+                        />
+                      </div>
+
+                      {/* Row 3: Homepage Hero H1 & Subtitle per Country */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                            تیتر اصلی هیرو کشور در صفحه اول (تگ H1)
+                          </label>
+                          <input
+                            type="text"
+                            value={curSeo?.heroHeading || ''}
+                            onChange={(e) => setSeoSettings(prev => ({
+                              ...prev,
+                              [seoActiveCountry]: {
+                                ...prev[seoActiveCountry],
+                                heroHeading: e.target.value
+                              }
+                            }))}
+                            placeholder="مثال: نیازمندی‌های فارسی‌زبانان سوئد"
+                            className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                            زیرتیتر هیرو کشور در صفحه اول
+                          </label>
+                          <input
+                            type="text"
+                            value={curSeo?.heroSubheading || ''}
+                            onChange={(e) => setSeoSettings(prev => ({
+                              ...prev,
+                              [seoActiveCountry]: {
+                                ...prev[seoActiveCountry],
+                                heroSubheading: e.target.value
+                              }
+                            }))}
+                            placeholder="مثال: مسکن، رستوران، خدمات و کاریابی در سراسر سوئد"
+                            className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Row 4: Keywords + Pill Preview */}
+                      <div>
+                        <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                          کلمات کلیدی هدف (با ویرگول جدا کنید)
+                        </label>
+                        <input
+                          type="text"
+                          value={curSeo?.keywords || ''}
+                          onChange={(e) => setSeoSettings(prev => ({
+                            ...prev,
+                            [seoActiveCountry]: {
+                              ...prev[seoActiveCountry],
+                              keywords: e.target.value
+                            }
+                          }))}
+                          className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all"
+                        />
+                        {kwList.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-2">
+                            {kwList.map((kw, i) => (
+                              <span key={i} className="px-2.5 py-0.5 rounded-full bg-stone-100 text-stone-700 text-[11px] font-medium">
+                                {kw}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Row 5: OpenGraph / Social Sharing Title & Description */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                            عنوان اشتراک‌گذاری در تلگرام و شبکه‌ها (OG Title)
+                          </label>
+                          <input
+                            type="text"
+                            value={curSeo?.ogTitle || ''}
+                            onChange={(e) => setSeoSettings(prev => ({
+                              ...prev,
+                              [seoActiveCountry]: {
+                                ...prev[seoActiveCountry],
+                                ogTitle: e.target.value
+                              }
+                            }))}
+                            placeholder={curSeo?.title || ''}
+                            className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                            توضیحات اشتراک‌گذاری شبکه‌ها (OG Description)
+                          </label>
+                          <input
+                            type="text"
+                            value={curSeo?.ogDescription || ''}
+                            onChange={(e) => setSeoSettings(prev => ({
+                              ...prev,
+                              [seoActiveCountry]: {
+                                ...prev[seoActiveCountry],
+                                ogDescription: e.target.value
+                              }
+                            }))}
+                            placeholder={curSeo?.description || ''}
+                            className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="pt-2 flex flex-wrap items-center justify-between gap-2">
+                        <button
+                          type="submit"
+                          disabled={savingSettings}
+                          className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
+                        >
+                          <Save size={15} />
+                          <span>ذخیره سئوی کشورها</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSeoSettings(prev => ({
+                              ...prev,
+                              [seoActiveCountry]: { ...DEFAULT_COUNTRY_SEO[seoActiveCountry] }
+                            }))
+                          }
+                          className="h-9 px-3.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 font-bold text-xs transition-colors cursor-pointer"
+                        >
+                          بازنشانی به سئوی استاندارد {COUNTRIES.find(c => c.id === seoActiveCountry)?.nameFa}
+                        </button>
+                      </div>
+                    </form>
+                  );
+                })()}
               </div>
 
               {/* Google Analytics (GA4) Card */}
