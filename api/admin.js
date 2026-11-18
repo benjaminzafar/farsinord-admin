@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
+import { validateCleanupSettings, DEFAULT_CLEANUP_SETTINGS } from './_lib/cleanupSettingsValidation.js';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://bezbnymjcnmazdonfzky.supabase.co';
 const HAS_SERVICE_ROLE = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -175,10 +176,13 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
-function createAdminToken(email) {
+export function createAdminToken(email) {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const displayName = cleanEmail.split('@')[0] || 'admin';
   const payload = Buffer.from(
     JSON.stringify({
-      sub: email,
+      sub: cleanEmail,
+      name: displayName,
       role: 'admin',
       exp: Date.now() + 24 * 60 * 60 * 1000
     })
@@ -187,7 +191,7 @@ function createAdminToken(email) {
   return `${payload}.${sig}`;
 }
 
-function verifyAdminToken(token) {
+export function verifyAdminToken(token) {
   if (!token || typeof token !== 'string' || !token.includes('.')) return null;
   const [payload, sig] = token.split('.');
   const expectedSig = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('base64url');
@@ -199,6 +203,72 @@ function verifyAdminToken(token) {
   } catch {
     return null;
   }
+}
+
+function resolveAdminIdentity(adminSession) {
+  const email = String(adminSession?.sub || '').trim().toLowerCase() || 'admin@linksho.eu';
+  const name = String(adminSession?.name || email.split('@')[0] || 'مدیر سیستم').trim();
+  return { email, name };
+}
+
+async function saveAndAuditCleanupSettings(rawValue, adminSession) {
+  const preCheck = validateCleanupSettings(rawValue, null);
+  if (!preCheck.ok) {
+    return {
+      status: 400,
+      body: { ok: false, error: preCheck.error, fieldErrors: preCheck.fieldErrors },
+    };
+  }
+
+  const { data: existingRow } = await supabase
+    .from('swedpersiska_settings')
+    .select('value')
+    .eq('key', 'ad_lifecycle_settings')
+    .maybeSingle();
+
+  const prevSettings =
+    existingRow?.value && typeof existingRow.value === 'object'
+      ? existingRow.value
+      : null;
+
+  const finalCheck = validateCleanupSettings(rawValue, prevSettings);
+  if (!finalCheck.ok) {
+    return {
+      status: 400,
+      body: { ok: false, error: finalCheck.error, fieldErrors: finalCheck.fieldErrors },
+    };
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error: upsertErr } = await supabase.from('swedpersiska_settings').upsert({
+    key: 'ad_lifecycle_settings',
+    value: finalCheck.value,
+    updated_at: nowIso,
+  });
+  if (upsertErr) throw upsertErr;
+
+  const identity = resolveAdminIdentity(adminSession);
+  const { data: auditEntry, error: auditErr } = await supabase
+    .from('ad_cleanup_settings_audit')
+    .insert({
+      admin_email: identity.email,
+      admin_name: identity.name,
+      previous_settings: prevSettings,
+      new_settings: finalCheck.value,
+      changed_at: nowIso,
+    })
+    .select('*')
+    .single();
+  if (auditErr) throw auditErr;
+
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      settings: finalCheck.value,
+      auditEntry,
+    },
+  };
 }
 
 function setCorsHeaders(req, res) {
@@ -252,6 +322,9 @@ export default async function handler(req, res) {
 
     if (!adminSession) {
       return res.status(401).json({ ok: false, error: 'نشست مدیریتی منقضی شده یا نامعتبر است. لطفاً مجدداً وارد شوید.' });
+    }
+    if (adminSession.role !== 'admin') {
+      return res.status(403).json({ ok: false, error: 'فقط مدیر سیستم به این بخش دسترسی دارد.' });
     }
 
     // 3. Protected Admin Actions
@@ -433,7 +506,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ads: enriched, count: count ?? 0, page });
     }
 
-    if (!HAS_SERVICE_ROLE && ['toggle_featured', 'update_status', 'update_country', 'delete_ad', 'dismiss_report', 'save_settings', 'resolve_duplicate_review', 'run_cleanup_now'].includes(action)) {
+    if (!HAS_SERVICE_ROLE && ['toggle_featured', 'update_status', 'update_country', 'delete_ad', 'dismiss_report', 'save_settings', 'save_cleanup_settings', 'resolve_duplicate_review', 'run_cleanup_now'].includes(action)) {
       return res.status(503).json({
         ok: false,
         error: 'متغیر امنیتی SUPABASE_SERVICE_ROLE_KEY روی سرور ادمین (Vercel) تنظیم نشده است.',
@@ -667,11 +740,33 @@ export default async function handler(req, res) {
       });
     }
 
+    if (action === 'save_cleanup_settings') {
+      const candidate =
+        body.settings && typeof body.settings === 'object' && !Array.isArray(body.settings)
+          ? body.settings
+          : {
+              enabled: body.enabled,
+              inactivityDays: body.inactivityDays,
+              warningDays: body.warningDays,
+              softDeleteRetentionDays: body.softDeleteRetentionDays,
+              freeBoostCooldownDays: body.freeBoostCooldownDays,
+              duplicateBlockThresholdSameOwner: body.duplicateBlockThresholdSameOwner,
+              duplicateBlockThresholdOtherOwner: body.duplicateBlockThresholdOtherOwner,
+              duplicateReviewThresholdSameOwner: body.duplicateReviewThresholdSameOwner,
+            };
+      const result = await saveAndAuditCleanupSettings(candidate, adminSession);
+      return res.status(result.status).json(result.body);
+    }
+
     if (action === 'save_settings') {
       const { key, value } = body;
       const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'portal_countries', 'stripe_settings', 'turnstile_settings', 'analytics_settings', 'r2_settings', 'podcast_settings', 'seller_deployments', 'cloudflare_deploy_settings', 'ad_lifecycle_settings'];
       if (!allowedKeys.includes(key)) {
         return res.status(400).json({ ok: false, error: 'Invalid settings key' });
+      }
+      if (key === 'ad_lifecycle_settings') {
+        const result = await saveAndAuditCleanupSettings(value, adminSession);
+        return res.status(result.status).json(result.body);
       }
       let nextValue = value;
       if (key === 'cloudflare_deploy_settings' && value && typeof value === 'object') {
@@ -1193,31 +1288,46 @@ export default async function handler(req, res) {
     }
 
     if (action === 'cleanup_overview') {
-      const [settingsRes, runsRes, logsRes, warnedRes, softDeletedRes, vipRes] = await Promise.all([
+      const [settingsRes, runsRes, logsRes, summaryRpcRes, auditRes] = await Promise.all([
         supabase.from('swedpersiska_settings').select('value').eq('key', 'ad_lifecycle_settings').maybeSingle(),
         supabase.from('ad_cleanup_runs').select('*').order('started_at', { ascending: false }).limit(20),
         supabase.from('ad_cleanup_logs').select('*').order('created_at', { ascending: false }).limit(50),
-        supabase.from('swedpersiska_ads').select('id', { count: 'exact', head: true }).not('cleanup_warning_sent_at', 'is', null).is('deleted_at', null),
-        supabase.from('swedpersiska_ads').select('id', { count: 'exact', head: true }).not('deleted_at', 'is', null),
-        supabase.from('swedpersiska_ads').select('id', { count: 'exact', head: true }).eq('is_featured', true).is('deleted_at', null),
+        supabase.rpc('get_ad_cleanup_summary'),
+        supabase.from('ad_cleanup_settings_audit').select('*').order('changed_at', { ascending: false }).limit(20),
       ]);
+
+      let summary;
+      if (!summaryRpcRes.error && summaryRpcRes.data) {
+        summary = {
+          warnedAds: Number(summaryRpcRes.data.warned_ads || 0),
+          softDeletedAds: Number(summaryRpcRes.data.soft_deleted_ads || 0),
+          permanentlyDeletedAds: Number(summaryRpcRes.data.permanently_deleted_ads || 0),
+          protectedVipAds: Number(summaryRpcRes.data.protected_vip_ads || 0),
+          protectedTotalAds: Number(summaryRpcRes.data.protected_total_ads || 0),
+        };
+      } else {
+        const [warnedRes, softDeletedRes, permDeletedRes, vipRes] = await Promise.all([
+          supabase.from('swedpersiska_ads').select('id', { count: 'exact', head: true }).not('cleanup_warning_sent_at', 'is', null).is('deleted_at', null),
+          supabase.from('swedpersiska_ads').select('id', { count: 'exact', head: true }).not('deleted_at', 'is', null),
+          supabase.from('ad_cleanup_logs').select('id', { count: 'exact', head: true }).eq('action', 'permanently_deleted'),
+          supabase.from('swedpersiska_ads').select('id', { count: 'exact', head: true }).eq('is_featured', true).is('deleted_at', null),
+        ]);
+        summary = {
+          warnedAds: warnedRes.count || 0,
+          softDeletedAds: softDeletedRes.count || 0,
+          permanentlyDeletedAds: permDeletedRes.count || 0,
+          protectedVipAds: vipRes.count || 0,
+          protectedTotalAds: vipRes.count || 0,
+        };
+      }
 
       return res.status(200).json({
         ok: true,
-        settings: settingsRes.data?.value || {
-          enabled: true,
-          inactivityDays: 30,
-          warningDays: 7,
-          softDeleteRetentionDays: 30,
-          freeBoostCooldownDays: 7,
-        },
+        settings: settingsRes.data?.value || DEFAULT_CLEANUP_SETTINGS,
         runs: runsRes.data || [],
         logs: logsRes.data || [],
-        summary: {
-          warnedAds: warnedRes.count || 0,
-          softDeletedAds: softDeletedRes.count || 0,
-          protectedVipAds: vipRes.count || 0,
-        },
+        settingsAudit: auditRes.data || [],
+        summary,
       });
     }
 

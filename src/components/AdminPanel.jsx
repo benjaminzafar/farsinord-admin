@@ -54,6 +54,7 @@ import {
   Dumbbell
 } from 'lucide-react';
 import CloudflareTurnstile from './CloudflareTurnstile';
+import AdCleanupSettingsSection from './AdCleanupSettingsSection';
 import { supabase } from '../lib/supabase';
 import { adminApi, getMainSiteUrl } from '../lib/apiClient';
 import { CATEGORIES, COUNTRIES, mergePortalCountries } from '../lib/translations';
@@ -272,7 +273,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [settingsSubTab, setSettingsSubTab] = useState(() => {
     try {
       const p = new URLSearchParams(window.location.search).get('tab');
-      if (p === 'monetization' || p === 'security') return p;
+      if (p === 'monetization' || p === 'security' || p === 'cleanup') return p;
     } catch {}
     return 'general';
   });
@@ -281,7 +282,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       const validTabs = ['overview', 'ads', 'websites', 'categories', 'settings', 'reports', 'lifecycle'];
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
-      if (tabParam === 'monetization' || tabParam === 'security') {
+      if (tabParam === 'monetization' || tabParam === 'security' || tabParam === 'cleanup') {
         return 'settings';
       }
       if (tabParam && validTabs.includes(tabParam)) {
@@ -299,11 +300,11 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const handleTabChange = (tab) => {
     playFeedback('click');
     let targetTab = tab;
-    if (tab === 'monetization' || tab === 'security') {
+    if (tab === 'monetization' || tab === 'security' || tab === 'cleanup') {
       targetTab = 'settings';
       setSettingsSubTab(tab);
     }
-    if (targetTab === 'lifecycle') {
+    if (targetTab === 'lifecycle' || tab === 'cleanup') {
       fetchLifecycleData(dupReviewFilter);
     }
     setActiveTab(targetTab);
@@ -407,12 +408,20 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [dupReviews, setDupReviews] = useState([]);
   const [dupReviewFilter, setDupReviewFilter] = useState('pending');
   const [lifecycleLoading, setLifecycleLoading] = useState(false);
+  const [savingCleanupSettings, setSavingCleanupSettings] = useState(false);
   const [cleanupRunning, setCleanupRunning] = useState(false);
   const [lastCleanupResult, setLastCleanupResult] = useState(null);
   const [cleanupOverview, setCleanupOverview] = useState({
     runs: [],
     logs: [],
-    summary: { warnedAds: 0, softDeletedAds: 0, protectedVipAds: 0 },
+    settingsAudit: [],
+    summary: {
+      warnedAds: 0,
+      softDeletedAds: 0,
+      permanentlyDeletedAds: 0,
+      protectedVipAds: 0,
+      protectedTotalAds: 0,
+    },
   });
   const [lifecycleSettings, setLifecycleSettings] = useState({
     enabled: true,
@@ -763,7 +772,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         } else {
           await fetchActiveAds(activePage || 1, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
         }
-        if (activeTab === 'lifecycle') {
+        if (activeTab === 'lifecycle' || (activeTab === 'settings' && settingsSubTab === 'cleanup')) {
           await fetchLifecycleData(dupReviewFilter);
         }
         return;
@@ -1472,7 +1481,14 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         setCleanupOverview({
           runs: Array.isArray(cleanRes.runs) ? cleanRes.runs : [],
           logs: Array.isArray(cleanRes.logs) ? cleanRes.logs : [],
-          summary: cleanRes.summary || { warnedAds: 0, softDeletedAds: 0, protectedVipAds: 0 },
+          settingsAudit: Array.isArray(cleanRes.settingsAudit) ? cleanRes.settingsAudit : [],
+          summary: cleanRes.summary || {
+            warnedAds: 0,
+            softDeletedAds: 0,
+            permanentlyDeletedAds: 0,
+            protectedVipAds: 0,
+            protectedTotalAds: 0,
+          },
         });
       }
     } catch (err) {
@@ -1531,27 +1547,35 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   };
 
-  const handleSaveLifecycleSettings = async (e) => {
-    e.preventDefault();
+  const handleSaveLifecycleSettings = async (nextSettings) => {
+    setSavingCleanupSettings(true);
     try {
-      const payload = {
-        enabled: Boolean(lifecycleSettings.enabled),
-        inactivityDays: Math.max(1, Math.min(365, Number(lifecycleSettings.inactivityDays) || 30)),
-        warningDays: Math.max(1, Math.min(60, Number(lifecycleSettings.warningDays) || 7)),
-        softDeleteRetentionDays: Math.max(1, Math.min(365, Number(lifecycleSettings.softDeleteRetentionDays) || 30)),
-        freeBoostCooldownDays: Math.max(1, Math.min(90, Number(lifecycleSettings.freeBoostCooldownDays) || 7)),
-        duplicateBlockThresholdSameOwner: 0.72,
-        duplicateBlockThresholdOtherOwner: 0.86,
-        duplicateReviewThresholdSameOwner: 0.55,
-      };
-      const apiRes = await adminApi.request('save_settings', { key: 'ad_lifecycle_settings', value: payload });
-      if (!apiRes?.ok) {
-        throw new Error(apiRes?.error || 'خطا در ذخیره تنظیمات چرخه عمر');
+      const apiRes = await adminApi.request('save_cleanup_settings', { settings: nextSettings });
+      if (!apiRes) {
+        const msg = 'ارتباط با سرور ادمین برقرار نشد یا توکن معتبر نیست.';
+        triggerToast(msg, 'error');
+        return { ok: false, error: msg, fieldErrors: {} };
       }
-      setLifecycleSettings(payload);
-      triggerToast('تنظیمات چرخه عمر و بوست رایگان ذخیره شد.');
+      if (!apiRes.ok) {
+        const msg = apiRes.error || 'خطا در ذخیره تنظیمات پاکسازی';
+        triggerToast(msg, 'error');
+        return { ok: false, error: msg, fieldErrors: apiRes.fieldErrors || {} };
+      }
+      const savedSettings = apiRes.settings || nextSettings;
+      setLifecycleSettings(savedSettings);
+      if (apiRes.auditEntry) {
+        setCleanupOverview(prev => ({
+          ...prev,
+          settingsAudit: [apiRes.auditEntry, ...(prev.settingsAudit || [])].slice(0, 20),
+        }));
+      }
+      triggerToast('تنظیمات پاکسازی آگهی‌ها در دیتابیس ذخیره و ثبت شد.');
+      return { ok: true, settings: savedSettings };
     } catch (err) {
       triggerToast(err.message, 'error');
+      return { ok: false, error: err.message || 'خطا در ذخیره تنظیمات پاکسازی', fieldErrors: {} };
+    } finally {
+      setSavingCleanupSettings(false);
     }
   };
 
@@ -3918,7 +3942,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   {[
                     { id: 'duplicates', label: `بررسی آگهی‌های تکراری (${dupReviews.length})` },
                     { id: 'cleanup', label: 'پاکسازی خودکار ماهانه و گزارش‌ها' },
-                    { id: 'settings', label: 'تنظیمات آستانه و بوست' },
+                    { id: 'settings', label: 'تنظیمات پاکسازی آگهی‌ها' },
                   ].map((tabItem) => (
                     <button
                       key={tabItem.id}
@@ -4072,18 +4096,22 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               {/* SUBTAB 2: SCHEDULED CLEANUP & LOGS */}
               {lifecycleSubTab === 'cleanup' && (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="p-4 rounded-2xl bg-white border border-stone-200/80">
-                      <span className="text-xs font-bold text-stone-500 block">آگهی‌های دارای هشدار ۷ روزه</span>
+                      <span className="text-xs font-bold text-stone-500 block">آگهی‌های هشدار گرفته ({lifecycleSettings.warningDays || 7} روزه)</span>
                       <span className="text-2xl font-black text-amber-600 tabular-nums">{cleanupOverview.summary.warnedAds}</span>
                     </div>
                     <div className="p-4 rounded-2xl bg-white border border-stone-200/80">
-                      <span className="text-xs font-bold text-stone-500 block">بایگانی حذف موقت</span>
+                      <span className="text-xs font-bold text-stone-500 block">آگهی‌های حذف نرم‌شده</span>
                       <span className="text-2xl font-black text-rose-600 tabular-nums">{cleanupOverview.summary.softDeletedAds}</span>
                     </div>
                     <div className="p-4 rounded-2xl bg-white border border-stone-200/80">
-                      <span className="text-xs font-bold text-stone-500 block">آگهی‌های VIP محافظت‌شده</span>
-                      <span className="text-2xl font-black text-emerald-600 tabular-nums">{cleanupOverview.summary.protectedVipAds}</span>
+                      <span className="text-xs font-bold text-stone-500 block">آگهی‌های حذف دائمی‌شده</span>
+                      <span className="text-2xl font-black text-stone-900 tabular-nums">{cleanupOverview.summary.permanentlyDeletedAds || 0}</span>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-white border border-stone-200/80">
+                      <span className="text-xs font-bold text-stone-500 block">محافظت‌شده (VIP / پرداخت / بررسی)</span>
+                      <span className="text-2xl font-black text-emerald-600 tabular-nums">{cleanupOverview.summary.protectedTotalAds ?? cleanupOverview.summary.protectedVipAds}</span>
                     </div>
                   </div>
 
@@ -4186,80 +4214,20 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 </div>
               )}
 
-              {/* SUBTAB 3: CONFIGURABLE THRESHOLDS */}
+              {/* SUBTAB 3: CONFIGURABLE CLEANUP SETTINGS & AUDIT LOG */}
               {lifecycleSubTab === 'settings' && (
-                <form onSubmit={handleSaveLifecycleSettings} className="p-5 rounded-2xl bg-white border border-stone-200/80 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-extrabold text-stone-900">تنظیمات چرخه عمر، پاکسازی و بوست</h3>
-                      <p className="text-xs text-stone-500">پیکربندی آستانه عدم فعالیت (پیش‌فرض ۳۰ روز)، مهلت هشدار (۷ روز) و فاصله بوست رایگان (۷ روز)</p>
-                    </div>
-                    <label className="inline-flex items-center gap-2 text-xs font-bold text-stone-800 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={lifecycleSettings.enabled}
-                        onChange={(e) => setLifecycleSettings(prev => ({ ...prev, enabled: e.target.checked }))}
-                        className="h-4 w-4 rounded text-blue-600"
-                      />
-                      <span>پاکسازی خودکار فعال</span>
-                    </label>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">آستانه عدم فعالیت (روز)</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={365}
-                        value={lifecycleSettings.inactivityDays}
-                        onChange={(e) => setLifecycleSettings(prev => ({ ...prev, inactivityDays: e.target.value }))}
-                        className="w-full rounded-xl border border-stone-300 px-3 py-2 text-xs font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">مهلت هشدار قبل از حذف (روز)</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={60}
-                        value={lifecycleSettings.warningDays}
-                        onChange={(e) => setLifecycleSettings(prev => ({ ...prev, warningDays: e.target.value }))}
-                        className="w-full rounded-xl border border-stone-300 px-3 py-2 text-xs font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">نگهداری پس از حذف موقت (روز)</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={365}
-                        value={lifecycleSettings.softDeleteRetentionDays}
-                        onChange={(e) => setLifecycleSettings(prev => ({ ...prev, softDeleteRetentionDays: e.target.value }))}
-                        className="w-full rounded-xl border border-stone-300 px-3 py-2 text-xs font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">فاصله بوست رایگان (روز)</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={90}
-                        value={lifecycleSettings.freeBoostCooldownDays}
-                        onChange={(e) => setLifecycleSettings(prev => ({ ...prev, freeBoostCooldownDays: e.target.value }))}
-                        className="w-full rounded-xl border border-stone-300 px-3 py-2 text-xs font-mono"
-                      />
-                    </div>
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold inline-flex items-center gap-2 cursor-pointer"
-                  >
-                    <Save size={14} />
-                    <span>ذخیره تنظیمات</span>
-                  </button>
-                </form>
+                <AdCleanupSettingsSection
+                  settings={lifecycleSettings}
+                  summary={cleanupOverview.summary}
+                  settingsAudit={cleanupOverview.settingsAudit}
+                  loading={lifecycleLoading}
+                  saving={savingCleanupSettings}
+                  onSave={handleSaveLifecycleSettings}
+                  onRefresh={() => fetchLifecycleData(dupReviewFilter)}
+                  onRunCleanup={handleRunCleanupNow}
+                  cleanupRunning={cleanupRunning}
+                  lastCleanupResult={lastCleanupResult}
+                />
               )}
             </div>
           )}
@@ -5509,6 +5477,33 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       : (settingsSubTab === 'podcast' ? 'bg-white/15 text-stone-300' : 'bg-stone-100 text-stone-500')
                   }`}>
                     {(podcastSettings.youtubeChannelUrl || (podcastSettings.manualVideos || []).length > 0) ? 'متصل' : 'خالی'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    playFeedback('click');
+                    setSettingsSubTab('cleanup');
+                    setSaveSuccessMsg('');
+                    fetchLifecycleData(dupReviewFilter);
+                  }}
+                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
+                    settingsSubTab === 'cleanup'
+                      ? 'bg-slate-900 text-white'
+                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
+                  }`}
+                >
+                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
+                    <Trash2 size={14} strokeWidth={2} className="block" />
+                  </span>
+                  <span className="leading-none">تنظیمات پاکسازی آگهی‌ها</span>
+                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none ${
+                    lifecycleSettings.enabled !== false
+                      ? (settingsSubTab === 'cleanup' ? 'bg-emerald-500/30 text-emerald-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70')
+                      : (settingsSubTab === 'cleanup' ? 'bg-white/15 text-stone-300' : 'bg-stone-100 text-stone-500')
+                  }`}>
+                    {lifecycleSettings.enabled !== false ? 'فعال' : 'غیرفعال'}
                   </span>
                 </button>
               </div>
@@ -6872,6 +6867,21 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               </div>
 
             </div>
+              )}
+
+              {settingsSubTab === 'cleanup' && (
+                <AdCleanupSettingsSection
+                  settings={lifecycleSettings}
+                  summary={cleanupOverview.summary}
+                  settingsAudit={cleanupOverview.settingsAudit}
+                  loading={lifecycleLoading}
+                  saving={savingCleanupSettings}
+                  onSave={handleSaveLifecycleSettings}
+                  onRefresh={() => fetchLifecycleData(dupReviewFilter)}
+                  onRunCleanup={handleRunCleanupNow}
+                  cleanupRunning={cleanupRunning}
+                  lastCleanupResult={lastCleanupResult}
+                />
               )}
             </div>
           )}
