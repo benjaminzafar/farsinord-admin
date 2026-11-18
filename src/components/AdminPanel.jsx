@@ -558,6 +558,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     deployUrl: 'https://linksho-seller.vercel.app/api/cloudflare/deploy',
     hasToken: false
   });
+  const [cfTestStatus, setCfTestStatus] = useState(null);
+  const [testingCf, setTestingCf] = useState(false);
 
   const [adminTurnstileToken, setAdminTurnstileToken] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
@@ -1800,6 +1802,30 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       triggerToast('خطا در ذخیره توکن کلودفلر: ' + err.message, 'error');
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  // Test Cloudflare Connection (verifies API Token, Account ID & workers.dev subdomain)
+  const handleTestCloudflareConnection = async () => {
+    setTestingCf(true);
+    setCfTestStatus(null);
+    try {
+      const apiRes = await adminApi.request('test_cloudflare_connection', {
+        apiToken: (cfDeploySettings.apiToken || '').trim(),
+      });
+      if (apiRes && apiRes.ok) {
+        setCfTestStatus(apiRes);
+        if (apiRes.accountId && !cfDeploySettings.accountId) {
+          setCfDeploySettings(prev => ({ ...prev, accountId: apiRes.accountId }));
+        }
+        triggerToast(`اتصال کلودفلر تایید شد (${apiRes.accountName})`, 'success');
+      } else {
+        triggerToast(apiRes?.error || 'اتصال به کلودفلر برقرار نشد.', 'error');
+      }
+    } catch (err) {
+      triggerToast('خطا در تست کلودفلر: ' + err.message, 'error');
+    } finally {
+      setTestingCf(false);
     }
   };
 
@@ -4171,14 +4197,34 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       توکن کلودفلر خود را اینجا وارد کنید تا کاربران پس از پرداخت ۲۶۰ کرون ماهانه بدون نیاز به ورود به کلودفلر، سایتشان را بسازند.
                     </p>
                   </div>
-                  <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
-                    cfDeploySettings.hasToken
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      : 'bg-amber-50 text-amber-700 border-amber-200'
-                  }`}>
-                    {cfDeploySettings.hasToken ? 'توکن ثبت شده' : 'نیاز به ثبت توکن'}
-                  </span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <a
+                      href="https://dash.cloudflare.com/profile/api-tokens"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="h-8 px-3 rounded-xl bg-[#F38020] hover:bg-[#E05D00] text-white text-[11px] font-bold inline-flex items-center gap-1.5 shadow-2xs transition-colors"
+                    >
+                      <span>ورود به کلودفلر و دریافت توکن</span>
+                      <ExternalLink size={12} />
+                    </a>
+                    <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                      cfDeploySettings.hasToken
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-amber-50 text-amber-700 border-amber-200'
+                    }`}>
+                      {cfDeploySettings.hasToken ? 'توکن ثبت شده' : 'نیاز به ثبت توکن'}
+                    </span>
+                  </div>
                 </div>
+
+                {cfTestStatus && (
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-between gap-2 flex-wrap">
+                    <span>متصل به حساب: {cfTestStatus.accountName}</span>
+                    {cfTestStatus.subdomain && (
+                      <span className="font-mono text-[11px]" dir="ltr">*.{cfTestStatus.subdomain}.workers.dev</span>
+                    )}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
@@ -4205,14 +4251,25 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   </div>
                 </div>
 
-                <button
-                  type="submit"
-                  disabled={savingSettings}
-                  className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs inline-flex items-center gap-2 cursor-pointer"
-                >
-                  <Save size={14} />
-                  <span>ذخیره توکن کلودفلر</span>
-                </button>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    type="submit"
+                    disabled={savingSettings}
+                    className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs inline-flex items-center gap-2 cursor-pointer"
+                  >
+                    <Save size={14} />
+                    <span>ذخیره توکن کلودفلر</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={testingCf}
+                    onClick={handleTestCloudflareConnection}
+                    className="h-10 px-4 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-800 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw size={13} className={testingCf ? 'animate-spin' : ''} />
+                    <span>{testingCf ? 'در حال بررسی...' : 'تست اتصال کلودفلر'}</span>
+                  </button>
+                </div>
               </form>
 
               {/* Deployed Seller Panels (Cloudflare Workers + D1 Control) */}

@@ -478,6 +478,40 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    if (action === 'test_cloudflare_connection') {
+      const { data: cfRow } = await supabase
+        .from('swedpersiska_settings')
+        .select('value')
+        .eq('key', 'cloudflare_deploy_settings')
+        .maybeSingle();
+      const cfCfg = (cfRow && cfRow.value) || {};
+      const cfToken = String(body.apiToken || cfCfg.apiToken || process.env.CLOUDFLARE_API_TOKEN || '').trim();
+      if (!cfToken) {
+        return res.status(400).json({ ok: false, error: 'ابتدا توکن کلودفلر را وارد و ذخیره کنید.' });
+      }
+      const accRes = await fetch('https://api.cloudflare.com/client/v4/accounts?per_page=5', {
+        headers: { Authorization: `Bearer ${cfToken}` },
+      });
+      const accJson = await accRes.json().catch(() => ({}));
+      if (!accRes.ok || !Array.isArray(accJson?.result) || accJson.result.length === 0) {
+        return res.status(401).json({
+          ok: false,
+          error: accJson?.errors?.[0]?.message || 'توکن کلودفلر نامعتبر است.',
+        });
+      }
+      const acc = accJson.result[0];
+      const subRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${acc.id}/workers/subdomain`, {
+        headers: { Authorization: `Bearer ${cfToken}` },
+      });
+      const subJson = await subRes.json().catch(() => ({}));
+      return res.status(200).json({
+        ok: true,
+        accountId: acc.id,
+        accountName: acc.name || acc.id,
+        subdomain: subJson?.result?.subdomain || '',
+      });
+    }
+
     if (action === 'delete_seller_deployment') {
       const workerName = String(body.workerName || '').trim();
       const dbId = String(body.dbId || '').trim();
