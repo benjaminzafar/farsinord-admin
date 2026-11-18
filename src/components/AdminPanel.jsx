@@ -57,7 +57,7 @@ import {
 import CloudflareTurnstile from './CloudflareTurnstile';
 import { supabase } from '../lib/supabase';
 import { adminApi, getMainSiteUrl } from '../lib/apiClient';
-import { CATEGORIES, COUNTRIES } from '../lib/translations';
+import { CATEGORIES, COUNTRIES, mergePortalCountries } from '../lib/translations';
 
 // Architecture Constant: Maximum 10 records per view (Minimal Data Loading Rule)
 const PAGE_SIZE = 10;
@@ -225,6 +225,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(adminApi.getToken()));
   const [adminEmailInput, setAdminEmailInput] = useState('swedpersiska@gmail.com');
   const [adminPassInput, setAdminPassInput] = useState('');
+  const [showAdminPass, setShowAdminPass] = useState(false);
+  const [loginSubmitting, setLoginSubmitting] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -287,20 +289,40 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
   const [categoryStatusFilter, setCategoryStatusFilter] = useState('all'); // 'all' | 'active' | 'disabled' | 'has_ads'
   const [catalogSubTab, setCatalogSubTab] = useState('categories'); // 'categories' | 'cities'
-  const [citiesByCountry, setCitiesByCountry] = useState(() => {
+  const [countriesList, setCountriesList] = useState(() => {
     try {
-      const saved = localStorage.getItem('swedpersiska_portal_cities');
+      const saved = localStorage.getItem('swedpersiska_portal_countries');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return mergePortalCountries(parsed);
       }
     } catch {}
+    return mergePortalCountries();
+  });
+  const [newCountryOpen, setNewCountryOpen] = useState(false);
+  const [newCountryForm, setNewCountryForm] = useState({
+    id: '',
+    nameFa: '',
+    currency: '€',
+    heroImage: '',
+    citiesText: ''
+  });
+  const [citiesByCountry, setCitiesByCountry] = useState(() => {
     const initial = {};
     COUNTRIES.forEach(c => {
       initial[c.id] = (c.cities || [])
         .filter(city => city.id !== 'all')
         .map(city => ({ id: city.id, fa: city.fa, enabled: true, isSystem: true }));
     });
+    try {
+      const saved = localStorage.getItem('swedpersiska_portal_cities');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return { ...initial, ...parsed };
+        }
+      }
+    } catch {}
     return initial;
   });
   const [cityCountryFilter, setCityCountryFilter] = useState('se');
@@ -514,24 +536,32 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             : str;
         setSeoSettings(prev => {
           const next = { ...prev };
-          ['se', 'no', 'dk', 'fi'].forEach((cid) => {
+          Object.keys(item.value).forEach((cid) => {
             const incoming = item.value[cid];
             if (incoming && typeof incoming === 'object') {
+              const base = prev[cid] || {};
               next[cid] = {
-                ...prev[cid],
+                ...base,
                 ...incoming,
-                title: cleanText(incoming.title) || prev[cid].title,
-                description: cleanText(incoming.description) || prev[cid].description,
-                keywords: cleanText(incoming.keywords) || prev[cid].keywords,
-                heroHeading: cleanText(incoming.heroHeading) || prev[cid].heroHeading,
-                heroSubheading: cleanText(incoming.heroSubheading) || prev[cid].heroSubheading,
-                ogTitle: cleanText(incoming.ogTitle) || prev[cid].ogTitle,
-                ogDescription: cleanText(incoming.ogDescription) || prev[cid].ogDescription,
+                title: cleanText(incoming.title) || base.title,
+                description: cleanText(incoming.description) || base.description,
+                keywords: cleanText(incoming.keywords) || base.keywords,
+                heroHeading: cleanText(incoming.heroHeading) || base.heroHeading,
+                heroSubheading: cleanText(incoming.heroSubheading) || base.heroSubheading,
+                ogTitle: cleanText(incoming.ogTitle) || base.ogTitle,
+                ogDescription: cleanText(incoming.ogDescription) || base.ogDescription,
               };
             }
           });
           return next;
         });
+      }
+      if (item.key === 'portal_countries' && Array.isArray(item.value) && item.value.length > 0) {
+        const merged = mergePortalCountries(item.value);
+        setCountriesList(merged);
+        try {
+          localStorage.setItem('swedpersiska_portal_countries', JSON.stringify(merged));
+        } catch {}
       }
       if (item.key === 'stripe_settings' && item.value) {
         setStripeSettings(prev => ({ ...prev, ...item.value }));
@@ -747,6 +777,129 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   };
 
+  // Persist Countries & Country Hero Background Photos to Supabase & localStorage
+  const persistCountries = async (updated) => {
+    setCountriesList(updated);
+    try {
+      localStorage.setItem('swedpersiska_portal_countries', JSON.stringify(updated));
+    } catch {}
+    try {
+      const apiRes = await adminApi.request('save_settings', { key: 'portal_countries', value: updated });
+      if (!apiRes) {
+        await supabase
+          .from('swedpersiska_settings')
+          .upsert({
+            key: 'portal_countries',
+            value: updated,
+            updated_at: new Date().toISOString()
+          });
+      }
+    } catch (err) {
+      console.error('Error saving countries to Supabase:', err);
+    }
+  };
+
+  const handleCountryHeroUpload = async (file, countryId) => {
+    if (!file) return;
+    if (file.size > 5242880) {
+      alert('حجم تصویر نباید بیشتر از ۵ مگابایت باشد.');
+      return;
+    }
+    setUploadingBrandKey(`country_${countryId}`);
+    try {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const base64Part = dataUrl.includes(',') ? dataUrl.split(',')[1] : '';
+      if (!base64Part) throw new Error('خطا در خواندن فایل تصویر.');
+
+      const res = await adminApi.request('upload_branding_file', {
+        kind: `country_${countryId}`,
+        contentType: file.type || 'image/jpeg',
+        fileBase64: base64Part,
+      });
+      if (!res || !res.ok || !res.publicUrl) {
+        throw new Error(res?.error || 'خطا در آپلود تصویر (بررسی کنید Cloudflare R2 فعال باشد).');
+      }
+      const nextCountries = countriesList.map(c =>
+        c.id === countryId ? { ...c, heroImage: res.publicUrl } : c
+      );
+      await persistCountries(nextCountries);
+      triggerToast('تصویر پس‌زمینه هیرو آپلود و ذخیره شد!');
+    } catch (err) {
+      alert(err.message || 'خطا در آپلود تصویر پس‌زمینه');
+    } finally {
+      setUploadingBrandKey(null);
+    }
+  };
+
+  const handleAddNewCountry = async () => {
+    const cleanId = String(newCountryForm.id || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    const cleanName = String(newCountryForm.nameFa || '').trim();
+    const cleanCurrency = String(newCountryForm.currency || '€').trim() || '€';
+    const cleanHero = String(newCountryForm.heroImage || '').trim() || '/images/cities/stockholm.jpg';
+
+    if (!cleanId || cleanId.length < 2) {
+      alert('لطفاً کد کوتاه انگلیسی کشور (مثلاً uk یا ch یا us) را وارد کنید.');
+      return;
+    }
+    if (!cleanName) {
+      alert('لطفاً نام فارسی کشور را وارد کنید.');
+      return;
+    }
+    if (countriesList.some(c => c.id === cleanId)) {
+      alert('این کد کشور قبلاً ثبت شده است.');
+      return;
+    }
+
+    const parsedCities = (newCountryForm.citiesText || '')
+      .split(/[،,\n]/)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(part => {
+        if (part.includes(':')) {
+          const [idPart, faPart] = part.split(':').map(x => x.trim());
+          return { id: idPart || faPart, fa: faPart || idPart, enabled: true, isSystem: false };
+        }
+        return { id: part, fa: part, enabled: true, isSystem: false };
+      });
+
+    const newCountryObj = {
+      id: cleanId,
+      nameFa: cleanName,
+      nameNative: cleanName,
+      flag: '🌍',
+      currency: cleanCurrency,
+      currencyName: cleanCurrency,
+      heroImage: cleanHero,
+      enabled: true,
+      isSystem: false,
+      cities: [
+        { id: 'all', fa: 'همه شهرها' },
+        ...parsedCities.map(ct => ({ id: ct.id, fa: ct.fa }))
+      ]
+    };
+
+    const nextCountries = [...countriesList, newCountryObj];
+    await persistCountries(nextCountries);
+
+    if (parsedCities.length > 0) {
+      const nextCities = {
+        ...citiesByCountry,
+        [cleanId]: parsedCities
+      };
+      await persistCities(nextCities);
+    }
+
+    setSeoActiveCountry(cleanId);
+    setNewCountryOpen(false);
+    setNewCountryForm({ id: '', nameFa: '', currency: '€', heroImage: '', citiesText: '' });
+    triggerToast(`کشور «${cleanName}» با موفقیت اضافه شد!`);
+  };
+
   const handleOpenAddCity = () => {
     playFeedback('click');
     setCityModal({
@@ -959,14 +1112,32 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       }
     }
 
+    setLoginSubmitting(true);
     try {
       await adminApi.login(adminEmailInput, adminPassInput);
       setIsAuthenticated(true);
       fetchAdminData();
     } catch (err) {
       setLoginError(err.message || 'ایمیل یا رمز عبور اشتباه است.');
+    } finally {
+      setLoginSubmitting(false);
     }
   };
+
+  // Pre-fetch turnstile & branding settings on login screen so Turnstile toggle in DB is respected
+  useEffect(() => {
+    if (isAuthenticated) return;
+    supabase
+      .from('swedpersiska_settings')
+      .select('key, value')
+      .in('key', ['turnstile_settings', 'site_branding'])
+      .then(({ data }) => {
+        if (Array.isArray(data)) {
+          applySettingsItems(data);
+        }
+      })
+      .catch(() => {});
+  }, [isAuthenticated]);
 
   // Logout handler
   const handleLogout = () => {
@@ -1210,6 +1381,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     e.preventDefault();
     setSavingSettings(true);
     try {
+      await persistCountries(countriesList);
       const apiRes = await adminApi.request('save_settings', { key: 'seo_settings', value: seoSettings });
       if (!apiRes) {
         const { error } = await supabase
@@ -1221,8 +1393,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           });
         if (error) throw error;
       }
-      const countryObj = COUNTRIES.find(c => c.id === seoActiveCountry) || COUNTRIES[0];
-      setSaveSuccessMsg(`تنظیمات سئوی کشور ${countryObj.nameFa} ذخیره شد.`);
+      const countryObj = countriesList.find(c => c.id === seoActiveCountry) || countriesList[0];
+      setSaveSuccessMsg(`تنظیمات سئو و پس‌زمینه کشور ${countryObj.nameFa} ذخیره شد.`);
       setTimeout(() => setSaveSuccessMsg(''), 3000);
     } catch (err) {
       alert('خطا در ذخیره سئو: ' + err.message);
@@ -1552,9 +1724,18 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">رمز عبور</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold text-[#1D1D1F]">رمز عبور</label>
+                <button
+                  type="button"
+                  onClick={() => setShowAdminPass((v) => !v)}
+                  className="text-[11px] font-semibold text-[#6E6E73] hover:text-[#1D1D1F] cursor-pointer"
+                >
+                  {showAdminPass ? 'مخفی کردن' : 'نمایش رمز'}
+                </button>
+              </div>
               <input
-                type="password"
+                type={showAdminPass ? 'text' : 'password'}
                 required
                 placeholder="••••••••"
                 value={adminPassInput}
@@ -1581,9 +1762,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
             <button
               type="submit"
-              className="w-full h-11 rounded-full bg-[#0066CC] hover:bg-[#0055AA] text-white font-bold text-xs shadow-[0_6px_18px_rgba(0,102,204,0.24)] active:scale-[0.96] transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] cursor-pointer"
+              disabled={loginSubmitting}
+              className="w-full h-11 rounded-full bg-[#0066CC] hover:bg-[#0055AA] disabled:opacity-60 text-white font-bold text-xs shadow-[0_6px_18px_rgba(0,102,204,0.24)] active:scale-[0.96] transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] cursor-pointer"
             >
-              ورود به پنل
+              {loginSubmitting ? 'در حال ورود...' : 'ورود به پنل'}
             </button>
           </form>
 
@@ -3486,9 +3668,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   <div className="p-4 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-3">
                     <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
                       <span className="text-xs font-bold text-stone-500 shrink-0">کشور:</span>
-                      <div className="p-1 rounded-xl bg-stone-100/80 border border-stone-200/80 inline-flex items-center gap-1">
-                        {COUNTRIES.map(c => {
-                          const list = citiesByCountry[c.id] || [];
+                      <div className="p-1 rounded-xl bg-stone-100/80 border border-stone-200/80 inline-flex items-center gap-1 flex-wrap">
+                        {countriesList.map(c => {
+                          const list = citiesByCountry[c.id] || (c.cities || []).filter(ct => ct.id !== 'all');
                           const isSelected = cityCountryFilter === c.id;
                           return (
                             <button
@@ -4342,38 +4524,145 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 </div>
               </form>
 
-              {/* Country-Specific Complete SEO Suite */}
+              {/* Country-Specific Complete SEO, Countries Manager & Hero Background Photo Suite */}
               <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-stone-200/80">
-                  <div>
-                    <h3 className="text-sm font-black text-zinc-900">سئوی جامع کشورها و متاتگ‌های گوگل (SEO)</h3>
-                    <p className="text-[11px] text-stone-500 mt-0.5">
-                      مدیریت عنوان گوگل، توضیحات متا، تیتر هیرو (H1)، کلمات کلیدی و پیش‌نمایش شبکه‌های اجتماعی به تفکیک هر کشور
-                    </p>
+                <div className="flex flex-col gap-3 pb-4 border-b border-stone-200/80">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-black text-zinc-900">مدیریت کشورها، تصویر پس‌زمینه هیرو و سئوی گوگل (SEO)</h3>
+                      <p className="text-[11px] text-stone-500 mt-0.5">
+                        تغییر تصویر پس‌زمینه هر کشور، افزودن کشورهای جدید (آلمان، اتریش، هلند، فرانسه، کانادا و...) و تنظیم متاتگ‌های گوگل
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setNewCountryOpen((v) => !v)}
+                      className="h-9 px-3.5 rounded-xl bg-[#0066CC] hover:bg-[#0055AA] text-white text-xs font-bold inline-flex items-center gap-1.5 shrink-0 self-start sm:self-auto transition-colors cursor-pointer"
+                    >
+                      <Plus size={14} />
+                      <span>{newCountryOpen ? 'بستن فرم کشور جدید' : 'افزودن کشور جدید'}</span>
+                    </button>
                   </div>
                   
-                  {/* Country Switcher Tabs */}
-                  <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200/80 self-start sm:self-auto">
-                    {COUNTRIES.map(c => (
+                  {/* Country Switcher Tabs (All Active & Custom Countries) */}
+                  <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl border border-stone-200/80 flex-wrap">
+                    {countriesList.map(c => (
                       <button
                         key={c.id}
                         type="button"
                         onClick={() => setSeoActiveCountry(c.id)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                           seoActiveCountry === c.id
                             ? 'bg-slate-900 text-white shadow-2xs'
                             : 'text-stone-600 hover:text-zinc-900'
                         }`}
                       >
-                        {c.nameFa}
+                        <span>{c.nameFa}</span>
+                        {c.enabled === false && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300">غیرفعال</span>
+                        )}
                       </button>
                     ))}
                   </div>
+
+                  {/* Inline Add New Country Form */}
+                  {newCountryOpen && (
+                    <div className="rounded-xl bg-stone-50 border border-stone-200/80 p-4 space-y-3 animate-in fade-in duration-150">
+                      <h4 className="text-xs font-extrabold text-zinc-900">افزودن کشور جدید به پلتفرم لینک شو</h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-bold text-stone-700 mb-1">کد کشور (۲ حرف انگلیسی، مثال: uk یا ch) *</label>
+                          <input
+                            type="text"
+                            maxLength={8}
+                            value={newCountryForm.id}
+                            onChange={(e) => setNewCountryForm(prev => ({ ...prev, id: e.target.value.toLowerCase() }))}
+                            placeholder="uk"
+                            className="w-full h-9 rounded-xl bg-white border border-stone-200 px-3 text-xs font-mono text-left"
+                            dir="ltr"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-stone-700 mb-1">نام فارسی کشور *</label>
+                          <input
+                            type="text"
+                            value={newCountryForm.nameFa}
+                            onChange={(e) => setNewCountryForm(prev => ({ ...prev, nameFa: e.target.value }))}
+                            placeholder="مثال: انگلیس یا سوئیس"
+                            className="w-full h-9 rounded-xl bg-white border border-stone-200 px-3 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-stone-700 mb-1">واحد پول (مثال: € یا £ یا $)</label>
+                          <input
+                            type="text"
+                            value={newCountryForm.currency}
+                            onChange={(e) => setNewCountryForm(prev => ({ ...prev, currency: e.target.value }))}
+                            placeholder="€"
+                            className="w-full h-9 rounded-xl bg-white border border-stone-200 px-3 text-xs font-mono text-left"
+                            dir="ltr"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-bold text-stone-700 mb-1">لینک تصویر پس‌زمینه هیرو (یا بعد از ثبت آپلود کنید)</label>
+                          <input
+                            type="url"
+                            value={newCountryForm.heroImage}
+                            onChange={(e) => setNewCountryForm(prev => ({ ...prev, heroImage: e.target.value }))}
+                            placeholder="https://images.unsplash.com/..."
+                            className="w-full h-9 rounded-xl bg-white border border-stone-200 px-3 text-xs font-mono text-left"
+                            dir="ltr"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-stone-700 mb-1">شهرهای اصلی (با ویرگول جدا کنید)</label>
+                          <input
+                            type="text"
+                            value={newCountryForm.citiesText}
+                            onChange={(e) => setNewCountryForm(prev => ({ ...prev, citiesText: e.target.value }))}
+                            placeholder="مثال: لندن، منچستر، بیرمنگام، لیدز"
+                            className="w-full h-9 rounded-xl bg-white border border-stone-200 px-3 text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setNewCountryOpen(false)}
+                          className="h-9 px-3.5 rounded-xl bg-stone-200/70 hover:bg-stone-200 text-stone-700 text-xs font-bold cursor-pointer"
+                        >
+                          انصراف
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleAddNewCountry}
+                          className="h-9 px-4 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold cursor-pointer"
+                        >
+                          ثبت و افزودن کشور
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* Live Google Search Result Preview (SERP) */}
+                {/* Live Google Search Result Preview (SERP) & Hero Background Photo Manager */}
                 {(() => {
-                  const curSeo = seoSettings[seoActiveCountry] || DEFAULT_COUNTRY_SEO[seoActiveCountry];
+                  const activeCountryObj = countriesList.find(c => c.id === seoActiveCountry) || countriesList[0];
+                  const cName = activeCountryObj?.nameFa || 'سوئد';
+                  const curSeo = seoSettings[seoActiveCountry] || DEFAULT_COUNTRY_SEO[seoActiveCountry] || {
+                    title: `لینک شو ${cName} | نیازمندی‌ها، مسکن، کاریابی و خدمات فارسی‌زبانان در ${cName}`,
+                    description: `لینک شو — محل رشد کسب و کار فارسی‌زبانان و مرجع آگهی‌های رایگان مسکن، رستوران، کاریابی و خدمات در سراسر ${cName}.`,
+                    keywords: `لینک شو, نیازمندیهای ${cName}, فارسی زبانان ${cName}, مسکن ${cName}, کار در ${cName}`,
+                    heroHeading: `نیازمندی‌های فارسی‌زبانان ${cName}`,
+                    heroSubheading: `مسکن، رستوران، خدمات و کاریابی در سراسر ${cName}`,
+                    ogTitle: `لینک شو ${cName} | مرجع نیازمندی‌های فارسی‌زبانان در ${cName}`,
+                    ogDescription: `ثبت و جستجوی مستقیم و رایگان مسکن، کار، رستوران و خدمات در سراسر ${cName}.`
+                  };
                   const titleLen = (curSeo?.title || '').length;
                   const descLen = (curSeo?.description || '').length;
                   const kwList = (curSeo?.keywords || '')
@@ -4383,11 +4672,119 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                   return (
                     <form onSubmit={saveSeoSettings} className="space-y-4">
+                      {/* Country Hero Background Photo & Status Manager */}
+                      <div className="rounded-xl bg-stone-50 p-4 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <h4 className="text-xs font-extrabold text-zinc-900">
+                              تصویر پس‌زمینه هیرو برای کشور «{cName}»
+                            </h4>
+                            <p className="text-[11px] text-stone-500">
+                              می‌توانید تصویر پس‌زمینه بالای سایت برای کشور {cName} را مستقیم آپلود کنید یا لینک تصویر قرار دهید
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const next = countriesList.map(c =>
+                                  c.id === seoActiveCountry ? { ...c, enabled: c.enabled === false ? true : false } : c
+                                );
+                                await persistCountries(next);
+                                triggerToast(`وضعیت نمایش کشور «${cName}» به‌روزرسانی شد.`);
+                              }}
+                              className={`h-8 px-3 rounded-lg text-[11px] font-bold cursor-pointer transition-colors ${
+                                activeCountryObj?.enabled !== false
+                                  ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                  : 'bg-stone-200 text-stone-700 hover:bg-stone-300'
+                              }`}
+                            >
+                              {activeCountryObj?.enabled !== false ? 'فعال در سایت' : 'غیرفعال در سایت'}
+                            </button>
+
+                            {!activeCountryObj?.isSystem && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!window.confirm(`آیا از حذف کشور «${cName}» مطمئن هستید؟`)) return;
+                                  const next = countriesList.filter(c => c.id !== seoActiveCountry);
+                                  await persistCountries(next);
+                                  setSeoActiveCountry(next[0]?.id || 'se');
+                                  triggerToast(`کشور «${cName}» حذف شد.`);
+                                }}
+                                className="h-8 px-2.5 rounded-lg bg-rose-100 hover:bg-rose-200 text-rose-700 text-[11px] font-bold cursor-pointer"
+                              >
+                                حذف کشور
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Hero Preview + Upload/URL Input */}
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                          <div className="relative h-20 w-full sm:w-40 rounded-xl overflow-hidden bg-stone-200 shrink-0 border border-stone-300">
+                            <img
+                              src={activeCountryObj?.heroImage || '/images/cities/stockholm.jpg'}
+                              alt={cName}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+
+                          <div className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                            <label className="h-10 px-3.5 rounded-xl bg-[#0066CC] hover:bg-[#0055AA] text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer shrink-0 transition-colors active:scale-95">
+                              <Plus size={14} />
+                              <span>
+                                {uploadingBrandKey === `country_${seoActiveCountry}`
+                                  ? 'در حال آپلود...'
+                                  : 'آپلود عکس پس‌زمینه'}
+                              </span>
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                disabled={uploadingBrandKey !== null}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  e.target.value = '';
+                                  handleCountryHeroUpload(f, seoActiveCountry);
+                                }}
+                                className="hidden"
+                              />
+                            </label>
+
+                            <input
+                              type="url"
+                              value={activeCountryObj?.heroImage || ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setCountriesList(prev =>
+                                  prev.map(c => (c.id === seoActiveCountry ? { ...c, heroImage: val } : c))
+                                );
+                              }}
+                              placeholder="https://... یا /images/cities/..."
+                              className="flex-1 min-w-0 h-10 rounded-xl bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none text-left"
+                              dir="ltr"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await persistCountries(countriesList);
+                                triggerToast(`تصویر پس‌زمینه کشور «${cName}» ذخیره شد!`);
+                              }}
+                              className="h-10 px-4 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold shrink-0 cursor-pointer"
+                            >
+                              ذخیره تصویر
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
                       {/* SERP Preview Box */}
                       <div className="rounded-xl bg-stone-50 p-4 space-y-1.5 text-right">
                         <div className="flex items-center justify-between text-[11px] text-stone-400">
-                          <span>پیش‌نمایش زنده در نتایج گوگل ({COUNTRIES.find(c => c.id === seoActiveCountry)?.nameFa})</span>
-                          <span className="font-mono" dir="ltr">linksho.com/?country={seoActiveCountry}</span>
+                          <span>پیش‌نمایش زنده در نتایج گوگل ({cName})</span>
+                          <span className="font-mono" dir="ltr">linksho.com/?c={seoActiveCountry}</span>
                         </div>
                         <div className="text-sm font-bold text-[#1a0dab] truncate">
                           {curSeo?.title || 'عنوان سئو...'}

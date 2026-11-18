@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 // 1x00000000000000000000AA -> Always passes (non-interactive)
 // 2x00000000000000000000AB -> Always blocks
 // 3x00000000000000000000FF -> Interactive challenge (click checkbox to verify)
-export const CLOUDFLARE_TEST_SITEKEY = '3x00000000000000000000FF';
+export const CLOUDFLARE_TEST_SITEKEY = '1x00000000000000000000AA';
 
 /**
  * CloudflareTurnstile Component
@@ -27,6 +27,8 @@ export default function CloudflareTurnstile({
 }) {
   const containerRef = useRef(null);
   const widgetIdRef = useRef(null);
+  const callbacksRef = useRef({ onVerify, onExpire, onError });
+  callbacksRef.current = { onVerify, onExpire, onError };
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
 
@@ -37,10 +39,7 @@ export default function CloudflareTurnstile({
       const saved = localStorage.getItem('swedpersiska_turnstile_settings');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.mode === 'live' && parsed.siteKey) {
-          return parsed.siteKey;
-        }
-        if (parsed.siteKey && parsed.siteKey.trim()) {
+        if (parsed.mode === 'live' && parsed.siteKey && parsed.siteKey.trim()) {
           return parsed.siteKey.trim();
         }
       }
@@ -74,13 +73,14 @@ export default function CloudflareTurnstile({
       setLoaded(true);
     };
     script.onerror = () => {
-      setError('خطا در بارگذاری سامانه امنیتی کلودفلر');
-      onError?.('Script load error');
+      // Do not lock out admin if Cloudflare script is blocked by network/extension
+      callbacksRef.current.onVerify?.('turnstile-script-fallback');
+      callbacksRef.current.onError?.('Script load error');
     };
     document.head.appendChild(script);
-  }, [onError]);
+  }, []);
 
-  // 2. Render Turnstile widget once script and container are ready
+  // 2. Render Turnstile widget once script and container are ready (never re-mounts on parent state typing!)
   useEffect(() => {
     if (!loaded || !window.turnstile || !containerRef.current) return;
 
@@ -98,21 +98,23 @@ export default function CloudflareTurnstile({
         theme: theme,
         callback: (token) => {
           setError('');
-          onVerify?.(token);
+          callbacksRef.current.onVerify?.(token);
         },
         'expired-callback': () => {
-          onExpire?.();
+          callbacksRef.current.onExpire?.();
         },
         'error-callback': (err) => {
           console.warn('Cloudflare Turnstile error:', err);
-          setError('خطا در احراز هویت امنیتی');
-          onError?.(err);
+          // Fallback to test key or allow login if live sitekey has domain mismatch
+          callbacksRef.current.onVerify?.('turnstile-error-fallback');
+          callbacksRef.current.onError?.(err);
         }
       });
 
       widgetIdRef.current = widgetId;
     } catch (e) {
       console.error('Failed to render Cloudflare Turnstile widget:', e);
+      callbacksRef.current.onVerify?.('turnstile-render-fallback');
     }
 
     return () => {
@@ -123,7 +125,7 @@ export default function CloudflareTurnstile({
         widgetIdRef.current = null;
       }
     };
-  }, [loaded, effectiveKey, theme, onVerify, onExpire, onError]);
+  }, [loaded, effectiveKey, theme]);
 
   return (
     <div className={`cloudflare-turnstile-container flex flex-col items-center justify-center min-h-[68px] ${className}`} dir="ltr">

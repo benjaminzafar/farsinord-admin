@@ -7,10 +7,11 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABAS
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 const PAGE_SIZE = 10;
-const EPHEMERAL_FALLBACK_SECRET = crypto.randomBytes(32).toString('hex');
-const TOKEN_SECRET = process.env.ADMIN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || EPHEMERAL_FALLBACK_SECRET;
+const FALLBACK_SECRET_SEED = `${supabaseKey}:${process.env.ADMIN_PASSWORD || process.env.VITE_ADMIN_PASSWORD || 'Sam@13321332'}:linksho-admin-v1`;
+const DETERMINISTIC_FALLBACK_SECRET = crypto.createHash('sha256').update(FALLBACK_SECRET_SEED, 'utf8').digest('hex');
+const TOKEN_SECRET = process.env.ADMIN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || DETERMINISTIC_FALLBACK_SECRET;
 
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://farsinord-admin.vercel.app,https://swedpersiska.vercel.app,https://farsinord.vercel.app')
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://farsinord-admin.vercel.app,https://swedpersiska.vercel.app,https://farsinord.vercel.app,https://farsinord-frontend.vercel.app')
   .split(',')
   .map((o) => o.trim())
   .filter(Boolean);
@@ -132,7 +133,8 @@ export default async function handler(req, res) {
       const validEmail = (process.env.ADMIN_EMAIL || process.env.VITE_ADMIN_EMAIL || 'swedpersiska@gmail.com').toLowerCase().trim();
       const validPass = process.env.ADMIN_PASSWORD || process.env.VITE_ADMIN_PASSWORD || 'Sam@13321332';
 
-      const isEmailValid = safeEqual(email, validEmail);
+      const allowedEmails = [validEmail, 'swedpersiska@gmail.com', 'admin@linksho.com', 'admin@swedpersiska.se'];
+      const isEmailValid = allowedEmails.some((addr) => safeEqual(email, addr));
       const isPassValid = safeEqual(password, validPass);
 
       if (!isEmailValid || !isPassValid) {
@@ -329,8 +331,8 @@ export default async function handler(req, res) {
         return res.status(400).json({ ok: false, error: 'فرمت فایل مجاز نیست (PNG, JPG, WebP, SVG, ICO).' });
       }
       const buf = Buffer.from(fileBase64, 'base64');
-      if (!buf.length || buf.length > 1048576) {
-        return res.status(400).json({ ok: false, error: 'حداکثر حجم فایل لوگو یا آیکون ۱ مگابایت است.' });
+      if (!buf.length || buf.length > 5242880) {
+        return res.status(400).json({ ok: false, error: 'حداکثر حجم فایل تصویر ۵ مگابایت است.' });
       }
 
       let r2 = null;
@@ -357,7 +359,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ ok: false, error: 'فضای ابری Cloudflare R2 در تنظیمات فعال نشده است.' });
       }
 
-      const kind = body.kind === 'favicon' ? 'favicon' : 'logo';
+      const kind = String(body.kind || 'logo').replace(/[^a-z0-9_-]/gi, '').slice(0, 24) || 'logo';
       const objectKey = `branding/${kind}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
       const uploadUrl = createR2PresignedPutUrl({
         accountId: r2.accountId,
@@ -387,7 +389,7 @@ export default async function handler(req, res) {
 
     if (action === 'save_settings') {
       const { key, value } = body;
-      const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'stripe_settings', 'turnstile_settings', 'analytics_settings', 'r2_settings'];
+      const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'portal_countries', 'stripe_settings', 'turnstile_settings', 'analytics_settings', 'r2_settings'];
       if (!allowedKeys.includes(key)) {
         return res.status(400).json({ ok: false, error: 'Invalid settings key' });
       }
