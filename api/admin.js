@@ -489,25 +489,52 @@ export default async function handler(req, res) {
       if (!cfToken) {
         return res.status(400).json({ ok: false, error: 'ابتدا توکن کلودفلر را وارد و ذخیره کنید.' });
       }
-      const accRes = await fetch('https://api.cloudflare.com/client/v4/accounts?per_page=5', {
+
+      // 1. Verify token directly (works even without Account Settings:Read permission)
+      const verifyRes = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', {
         headers: { Authorization: `Bearer ${cfToken}` },
       });
-      const accJson = await accRes.json().catch(() => ({}));
-      if (!accRes.ok || !Array.isArray(accJson?.result) || accJson.result.length === 0) {
+      const verifyJson = await verifyRes.json().catch(() => ({}));
+      if (!verifyRes.ok || verifyJson.success === false) {
         return res.status(401).json({
           ok: false,
-          error: accJson?.errors?.[0]?.message || 'توکن کلودفلر نامعتبر است.',
+          error: verifyJson?.errors?.[0]?.message || 'توکن کلودفلر نامعتبر یا منقضی شده است.',
         });
       }
-      const acc = accJson.result[0];
-      const subRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${acc.id}/workers/subdomain`, {
+
+      let accountId = String(body.accountId || cfCfg.accountId || process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+      let accountName = '';
+
+      if (!accountId) {
+        const accRes = await fetch('https://api.cloudflare.com/client/v4/accounts?per_page=5', {
+          headers: { Authorization: `Bearer ${cfToken}` },
+        });
+        const accJson = await accRes.json().catch(() => ({}));
+        if (accRes.ok && Array.isArray(accJson?.result) && accJson.result.length > 0) {
+          accountId = accJson.result[0].id;
+          accountName = accJson.result[0].name || accountId;
+        }
+      }
+
+      if (!accountId) {
+        return res.status(200).json({
+          ok: true,
+          needsAccountId: true,
+          accountId: '',
+          accountName: 'توکن معتبر است (شناسه Account ID را وارد کنید)',
+          subdomain: '',
+        });
+      }
+
+      const subRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`, {
         headers: { Authorization: `Bearer ${cfToken}` },
       });
       const subJson = await subRes.json().catch(() => ({}));
       return res.status(200).json({
         ok: true,
-        accountId: acc.id,
-        accountName: acc.name || acc.id,
+        needsAccountId: false,
+        accountId,
+        accountName: accountName || accountId,
         subdomain: subJson?.result?.subdomain || '',
       });
     }

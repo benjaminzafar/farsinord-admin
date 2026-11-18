@@ -1812,13 +1812,21 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     try {
       const apiRes = await adminApi.request('test_cloudflare_connection', {
         apiToken: (cfDeploySettings.apiToken || '').trim(),
+        accountId: (cfDeploySettings.accountId || '').trim(),
       });
       if (apiRes && apiRes.ok) {
         setCfTestStatus(apiRes);
         if (apiRes.accountId && !cfDeploySettings.accountId) {
           setCfDeploySettings(prev => ({ ...prev, accountId: apiRes.accountId }));
         }
-        triggerToast(`اتصال کلودفلر تایید شد (${apiRes.accountName})`, 'success');
+        triggerToast(
+          apiRes.needsAccountId
+            ? 'توکن معتبر است! لطفاً شناسه Account ID را هم در کادر کناری وارد و ذخیره کنید.'
+            : `اتصال کلودفلر تایید شد (${apiRes.accountName})`,
+          'success'
+        );
+      } else if (apiRes === null) {
+        triggerToast('برای تست زنده توکن، با نشست اصلی سرور ادمین وارد شوید (توکن شما در دیتابیس ذخیره می‌شود).', 'error');
       } else {
         triggerToast(apiRes?.error || 'اتصال به کلودفلر برقرار نشد.', 'error');
       }
