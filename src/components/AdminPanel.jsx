@@ -3735,10 +3735,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               TAB: CATEGORIES & CITIES MANAGEMENT
           ======================================================== */}
           {activeTab === 'categories' && (
-            <div className="space-y-4 w-full">
+            <div className="space-y-4 w-full max-w-5xl mx-auto">
 
               {/* Sub-Navigation Pills: Categories vs Cities */}
-              <div className="p-1.5 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.03)] flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+              <div className="p-1.5 rounded-2xl border border-stone-200/80 bg-white flex flex-wrap items-center gap-1.5 w-fit max-w-full">
                 <button
                   type="button"
                   onClick={() => { playFeedback('click'); setCatalogSubTab('categories'); }}
@@ -4371,7 +4371,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
             });
 
             return (
-            <div className="space-y-5 w-full py-1 animate-in fade-in duration-150 ease-out">
+            <div className="space-y-5 w-full max-w-6xl mx-auto py-1 animate-in fade-in duration-150 ease-out">
               {/* Smart Billing & 14-Day Overdue Reminder Banner */}
               {(upcomingInvoiceList.length > 0 || overdue14List.length > 0) && (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 space-y-2">
@@ -4880,9 +4880,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               TAB 3: SETTINGS (BRANDING, SEO & COUNTRIES, STRIPE, SECURITY)
           ======================================================== */}
           {activeTab === 'settings' && (
-            <div className="space-y-4 w-full py-1">
+            <div className="space-y-5 w-full max-w-4xl mx-auto py-1">
               {/* Sub-Navigation Pills */}
-              <div className="p-1.5 rounded-2xl border border-stone-200/80 bg-white flex flex-wrap items-center gap-1.5">
+              <div className="p-1.5 rounded-2xl border border-stone-200/80 bg-white flex flex-wrap items-center gap-1.5 w-fit max-w-full">
                 <button
                   type="button"
                   onClick={() => { playFeedback('click'); setSettingsSubTab('general'); setSaveSuccessMsg(''); }}
