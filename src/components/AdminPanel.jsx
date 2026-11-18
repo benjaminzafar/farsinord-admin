@@ -2843,59 +2843,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               {/* Filter Controls Bar */}
               <div className="p-4 rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-3">
 
-                {/* 0. Status Moderation Queue Pills */}
-                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1 border-b border-stone-100">
-                  <span className="text-xs font-bold text-stone-500 shrink-0">وضعیت:</span>
-                  <div className="p-1 rounded-xl bg-stone-100/80 border border-stone-200/80 inline-flex items-center gap-1">
-                    {[
-                      { id: 'pending', label: `در انتظار تایید (${counts.pending || 0})`, highlight: (counts.pending || 0) > 0 },
-                      { id: 'active', label: `منتشر شده (${counts.active || 0})` },
-                      { id: 'all', label: `همه (${counts.total || 0})` },
-                    ].map(st => {
-                      const active = adStatusFilter === st.id;
-                      return (
-                        <button
-                          key={st.id}
-                          type="button"
-                          onClick={() => {
-                            playFeedback('select');
-                            setAdStatusFilter(st.id);
-                            fetchActiveAds(1, searchQuery, countryFilter, categoryFilter, st.id, vipOnlyFilter);
-                          }}
-                          className={`min-h-[30px] px-3.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all select-none active:scale-95 cursor-pointer ${
-                            active
-                              ? 'bg-white text-zinc-950 shadow-xs'
-                              : st.highlight
-                                ? 'text-amber-800 bg-amber-50 hover:bg-amber-100'
-                                : 'text-stone-600 hover:text-zinc-950 hover:bg-white/50'
-                          }`}
-                        >
-                          {st.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* VIP Only Toggle Pill */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      playFeedback('select');
-                      const nextVip = !vipOnlyFilter;
-                      setVipOnlyFilter(nextVip);
-                      fetchActiveAds(1, searchQuery, countryFilter, categoryFilter, adStatusFilter, nextVip);
-                    }}
-                    className={`min-h-[34px] px-3.5 rounded-xl text-xs font-bold whitespace-nowrap border inline-flex items-center gap-1.5 transition-all select-none active:scale-95 cursor-pointer ${
-                      vipOnlyFilter
-                        ? 'bg-amber-50 text-amber-900 border-amber-300 shadow-2xs'
-                        : 'bg-stone-50 text-stone-600 border-stone-200 hover:text-stone-900'
-                    }`}
-                  >
-                    <Sparkles size={13} className={vipOnlyFilter ? 'text-amber-600' : 'text-stone-400'} />
-                    <span>فقط ویژه ({counts.vip || 0})</span>
-                  </button>
-                </div>
-
                 {/* 1. Country Filter Pills */}
                 <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
                   <span className="text-xs font-bold text-stone-500 shrink-0">کشور:</span>
