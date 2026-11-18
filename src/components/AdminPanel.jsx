@@ -4325,24 +4325,31 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                         );
                       })
                       .map((dep) => {
+                      const isPendingSetup = dep.status === 'pending_setup' || !dep.panelUrl;
                       const expTime = dep.expiresAt
                         ? new Date(dep.expiresAt).getTime()
                         : (dep.createdAt ? new Date(dep.createdAt).getTime() + 30 * 24 * 60 * 60 * 1000 : Date.now());
                       const isExpired = expTime < Date.now();
                       const expLabel = new Date(expTime).toLocaleDateString('fa-IR');
                       return (
-                      <div key={dep.workerName} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
+                      <div key={dep.workerName || dep.storeId} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
                         <div className="min-w-0 space-y-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs font-black text-zinc-900">{dep.name}</span>
                             <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-stone-200/70 text-stone-700">{dep.storeId}</span>
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                              isExpired
-                                ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            }`}>
-                              {isExpired ? `منقضی (${expLabel})` : `فعال تا ${expLabel} • ۲۶۰ کرون/ماه`}
-                            </span>
+                            {isPendingSetup ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border bg-amber-50 text-amber-800 border-amber-200">
+                                در انتظار ساخت و ارسال ایمیل (۲۴ ساعته) • ۲۶۰ کرون
+                              </span>
+                            ) : (
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                isExpired
+                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              }`}>
+                                {isExpired ? `منقضی (${expLabel})` : `فعال تا ${expLabel} • ۲۶۰ کرون/ماه`}
+                              </span>
+                            )}
                             {dep.companyNumber && (
                               <span className="text-[10.5px] font-bold text-stone-600">ثبت شرکت: <span className="font-mono">{dep.companyNumber}</span></span>
                             )}
@@ -4351,15 +4358,17 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                             {dep.phone && <span dir="ltr" className="font-mono">{dep.phone}</span>}
                             {dep.email && <span dir="ltr" className="font-mono">{dep.email}</span>}
                           </div>
-                          <a
-                            href={dep.panelUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[11px] font-mono text-[#0066CC] hover:underline truncate block"
-                            dir="ltr"
-                          >
-                            {dep.panelUrl}
-                          </a>
+                          {dep.panelUrl && (
+                            <a
+                              href={dep.panelUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[11px] font-mono text-[#0066CC] hover:underline truncate block"
+                              dir="ltr"
+                            >
+                              {dep.panelUrl}
+                            </a>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
