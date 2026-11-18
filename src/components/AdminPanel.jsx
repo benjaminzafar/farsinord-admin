@@ -49,6 +49,7 @@ import {
   BookOpen,
   Stethoscope,
   Music,
+  Headphones,
   Hammer,
   Dumbbell
 } from 'lucide-react';
@@ -220,6 +221,7 @@ const CATEGORY_ICON_MAP = {
   BookOpen,
   Stethoscope,
   Music,
+  Headphones,
   Hammer,
   Dumbbell,
   FolderTree,
@@ -537,6 +539,18 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     hasCredentials: false
   });
 
+  // News Podcast & YouTube Feed State
+  const [podcastSettings, setPodcastSettings] = useState({
+    enabled: true,
+    title: 'پادکست خبری لینک شو',
+    subtitle: 'تازه‌ترین گزارش‌ها و پادکست‌های خبری فارسی‌زبانان اروپا',
+    youtubeChannelUrl: '',
+    youtubeChannelId: '',
+    manualVideos: []
+  });
+  const [newPodcastVideoUrl, setNewPodcastVideoUrl] = useState('');
+  const [newPodcastVideoTitle, setNewPodcastVideoTitle] = useState('');
+
   const [adminTurnstileToken, setAdminTurnstileToken] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
@@ -622,6 +636,13 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       }
       if (item.key === 'r2_settings' && item.value) {
         setR2Settings(prev => ({ ...prev, ...item.value }));
+      }
+      if (item.key === 'podcast_settings' && item.value) {
+        setPodcastSettings(prev => ({
+          ...prev,
+          ...item.value,
+          manualVideos: Array.isArray(item.value.manualVideos) ? item.value.manualVideos : [],
+        }));
       }
       if (item.key === 'portal_categories' && item.value && Array.isArray(item.value) && item.value.length > 0) {
         setCategoriesList(item.value);
@@ -1636,6 +1657,82 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       setTimeout(() => setSaveSuccessMsg(''), 3500);
     } catch (err) {
       triggerToast('خطا در ذخیره تنظیمات درگاه پرداخت: ' + err.message, 'error');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  // Extract YouTube Video ID or Channel ID
+  const extractYoutubeVideoId = (rawUrl) => {
+    if (!rawUrl) return '';
+    const trimmed = String(rawUrl).trim();
+    if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
+    const match = trimmed.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+    return match ? match[1] : '';
+  };
+
+  const handleAddManualPodcastVideo = () => {
+    const videoId = extractYoutubeVideoId(newPodcastVideoUrl);
+    if (!videoId) {
+      triggerToast('لینک ویدیوی یوتیوب معتبر نیست (مثال: https://youtu.be/... یا youtube.com/watch?v=...)', 'error');
+      return;
+    }
+    const existing = Array.isArray(podcastSettings.manualVideos) ? podcastSettings.manualVideos : [];
+    if (existing.some(v => v.videoId === videoId)) {
+      triggerToast('این ویدیو قبلاً در لیست ثبت شده است.', 'error');
+      return;
+    }
+    const nextItem = {
+      videoId,
+      title: (newPodcastVideoTitle || '').trim() || `قسمت پادکست (${videoId})`,
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+      addedAt: new Date().toISOString()
+    };
+    setPodcastSettings(prev => ({
+      ...prev,
+      manualVideos: [nextItem, ...(prev.manualVideos || [])]
+    }));
+    setNewPodcastVideoUrl('');
+    setNewPodcastVideoTitle('');
+  };
+
+  // Save News Podcast & YouTube Feed Settings
+  const savePodcastSettings = async (e) => {
+    if (e) e.preventDefault();
+    setSavingSettings(true);
+    try {
+      const chUrl = (podcastSettings.youtubeChannelUrl || '').trim();
+      const chMatch = chUrl.match(/youtube\.com\/channel\/(UC[a-zA-Z0-9_-]+)/);
+      const resolvedChannelId = (podcastSettings.youtubeChannelId || '').trim() || (chMatch ? chMatch[1] : '');
+
+      const payload = {
+        enabled: podcastSettings.enabled !== false,
+        title: (podcastSettings.title || '').trim() || 'پادکست خبری لینک شو',
+        subtitle: (podcastSettings.subtitle || '').trim() || 'تازه‌ترین گزارش‌ها و پادکست‌های خبری فارسی‌زبانان اروپا',
+        youtubeChannelUrl: chUrl,
+        youtubeChannelId: resolvedChannelId,
+        manualVideos: Array.isArray(podcastSettings.manualVideos) ? podcastSettings.manualVideos : []
+      };
+
+      const apiRes = await adminApi.request('save_settings', { key: 'podcast_settings', value: payload });
+      if (!apiRes || !apiRes.ok) {
+        const { error } = await supabase
+          .from('swedpersiska_settings')
+          .upsert({
+            key: 'podcast_settings',
+            value: payload,
+            updated_at: new Date().toISOString()
+          });
+        if (error) throw error;
+      }
+
+      setPodcastSettings(payload);
+      const msg = 'تنظیمات پادکست خبری و لینک یوتیوب با موفقیت ذخیره شد!';
+      setSaveSuccessMsg(msg);
+      triggerToast(msg, 'success');
+      setTimeout(() => setSaveSuccessMsg(''), 3500);
+    } catch (err) {
+      triggerToast('خطا در ذخیره تنظیمات پادکست خبری: ' + err.message, 'error');
     } finally {
       setSavingSettings(false);
     }
@@ -3997,7 +4094,199 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     {turnstileSettings.enabled ? 'فعال' : 'غیرفعال'}
                   </span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => { playFeedback('click'); setSettingsSubTab('podcast'); }}
+                  className={`flex-1 sm:flex-initial min-h-[38px] px-3.5 rounded-xl text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
+                    settingsSubTab === 'podcast'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
+                  }`}
+                >
+                  <Headphones size={14} className={settingsSubTab === 'podcast' ? 'text-rose-300' : 'text-stone-400'} />
+                  <span>پادکست خبری و یوتیوب</span>
+                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                    podcastSettings.youtubeChannelUrl || (podcastSettings.manualVideos || []).length > 0
+                      ? (settingsSubTab === 'podcast' ? 'bg-rose-500/30 text-rose-200' : 'bg-rose-50 text-rose-700 border border-rose-200/70')
+                      : (settingsSubTab === 'podcast' ? 'bg-white/15 text-stone-300' : 'bg-stone-100 text-stone-500')
+                  }`}>
+                    {(podcastSettings.youtubeChannelUrl || (podcastSettings.manualVideos || []).length > 0) ? 'متصل' : 'خالی'}
+                  </span>
+                </button>
               </div>
+
+              {settingsSubTab === 'podcast' && (
+            <div className="space-y-6 w-full py-2 animate-in fade-in duration-150 ease-out">
+              <div className="border-b border-stone-200/80 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-black text-zinc-900">پادکست خبری و فید یوتیوب</h2>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    لینک کانال یوتیوب خود را وارد کنید تا آخرین ویدیوهای خبری به‌صورت خودکار در فید پادکست خبری سایت نمایش داده شوند.
+                  </p>
+                </div>
+                <span className={`self-start sm:self-auto px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                  podcastSettings.enabled !== false
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-stone-100 text-stone-600 border-stone-200'
+                }`}>
+                  {podcastSettings.enabled !== false ? 'فعال در سایت' : 'غیرفعال'}
+                </span>
+              </div>
+
+              <form onSubmit={savePodcastSettings} className="space-y-5">
+                <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                  <label className="flex items-center justify-between p-4 rounded-xl bg-stone-50 hover:bg-stone-100/70 border border-stone-200/80 cursor-pointer transition-all">
+                    <div>
+                      <span className="text-xs font-bold text-zinc-900 block">فعال‌سازی بخش پادکست خبری در سایت</span>
+                      <span className="text-[11px] text-stone-500">نمایش فید خبری و پخش‌کننده یوتیوب در منوی اصلی و موبایل</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={podcastSettings.enabled !== false}
+                      onChange={(e) => setPodcastSettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                      className="h-4 w-4 rounded text-zinc-900 focus:ring-zinc-900 cursor-pointer"
+                    />
+                  </label>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">عنوان بخش پادکست خبری</label>
+                      <input
+                        type="text"
+                        value={podcastSettings.title || ''}
+                        onChange={(e) => setPodcastSettings(prev => ({ ...prev, title: e.target.value }))}
+                        placeholder="پادکست خبری لینک شو"
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">توضیح کوتاه (زیرعنوان)</label>
+                      <input
+                        type="text"
+                        value={podcastSettings.subtitle || ''}
+                        onChange={(e) => setPodcastSettings(prev => ({ ...prev, subtitle: e.target.value }))}
+                        placeholder="تازه‌ترین گزارش‌ها و پادکست‌های خبری فارسی‌زبانان اروپا"
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                        لینک کانال یوتیوب (YouTube Channel URL)
+                      </label>
+                      <input
+                        type="url"
+                        dir="ltr"
+                        value={podcastSettings.youtubeChannelUrl || ''}
+                        onChange={(e) => setPodcastSettings(prev => ({ ...prev, youtubeChannelUrl: e.target.value }))}
+                        placeholder="https://www.youtube.com/@YourChannel"
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all text-left"
+                      />
+                      <p className="text-[10.5px] text-stone-400 mt-1">
+                        لینک @handle یا لینک مستقیم /channel/UC... را وارد کنید تا فید ویدیوها خودکار خوانده شود.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                        شناسه کانال یوتیوب (اختیاری - Channel ID)
+                      </label>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        value={podcastSettings.youtubeChannelId || ''}
+                        onChange={(e) => setPodcastSettings(prev => ({ ...prev, youtubeChannelId: e.target.value }))}
+                        placeholder="UCxxxxxxxxxxxxxxxxxxxxxx"
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all text-left"
+                      />
+                      <p className="text-[10.5px] text-stone-400 mt-1">
+                        در صورت خالی بودن، سیستم به‌صورت خودکار از لینک کانال استخراج می‌کند.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Optional Manual / Pinned YouTube Episodes */}
+                <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-zinc-900">افزودن دستی ویدیو / قسمت ویژه به فید (اختیاری)</h3>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      علاوه بر ویدیوهای خودکار کانال، می‌توانید لینک تکی ویدیوهای یوتیوب را هم اینجا پین کنید.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      value={newPodcastVideoTitle}
+                      onChange={(e) => setNewPodcastVideoTitle(e.target.value)}
+                      placeholder="عنوان قسمت (اختیاری)"
+                      className="sm:w-56 h-10 rounded-xl bg-stone-50 border border-stone-200/80 px-3 text-xs text-zinc-900 focus:bg-white focus:border-stone-400 focus:outline-none"
+                    />
+                    <input
+                      type="url"
+                      dir="ltr"
+                      value={newPodcastVideoUrl}
+                      onChange={(e) => setNewPodcastVideoUrl(e.target.value)}
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      className="flex-1 h-10 rounded-xl bg-stone-50 border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:bg-white focus:border-stone-400 focus:outline-none text-left"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddManualPodcastVideo}
+                      className="h-10 px-4 rounded-xl bg-[#0066CC] hover:bg-[#0055AA] text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+                    >
+                      <Plus size={14} />
+                      <span>افزودن ویدیو</span>
+                    </button>
+                  </div>
+
+                  {(podcastSettings.manualVideos || []).length > 0 && (
+                    <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/80 overflow-hidden">
+                      {(podcastSettings.manualVideos || []).map((v) => (
+                        <div key={v.videoId} className="p-2.5 flex items-center justify-between gap-3 bg-stone-50/50">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <img
+                              src={`https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`}
+                              alt=""
+                              className="w-16 h-10 rounded-lg object-cover border border-stone-200 shrink-0"
+                            />
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-zinc-900 truncate">{v.title}</p>
+                              <p className="text-[10.5px] font-mono text-stone-400 truncate" dir="ltr">{v.url}</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setPodcastSettings(prev => ({
+                              ...prev,
+                              manualVideos: (prev.manualVideos || []).filter(item => item.videoId !== v.videoId)
+                            }))}
+                            className="h-8 w-8 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 cursor-pointer"
+                            title="حذف ویدیو"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={savingSettings}
+                  className="h-10 px-6 rounded-xl bg-slate-900 hover:bg-black disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 shadow-2xs active:scale-[0.98] transition-all cursor-pointer"
+                >
+                  <Save size={15} />
+                  <span>{savingSettings ? 'در حال ذخیره‌سازی...' : 'ذخیره تنظیمات پادکست خبری'}</span>
+                </button>
+              </form>
+            </div>
+              )}
 
               {settingsSubTab === 'monetization' && (
             <div className="space-y-6 w-full py-2 animate-in fade-in duration-150 ease-out">
