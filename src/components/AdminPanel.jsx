@@ -551,6 +551,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [newPodcastVideoUrl, setNewPodcastVideoUrl] = useState('');
   const [newPodcastVideoTitle, setNewPodcastVideoTitle] = useState('');
   const [sellerDeployments, setSellerDeployments] = useState([]);
+  const [sellerSearch, setSellerSearch] = useState('');
   const [deletingDeployment, setDeletingDeployment] = useState('');
   const [cfDeploySettings, setCfDeploySettings] = useState({
     apiToken: '',
@@ -4282,7 +4283,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
               {/* Deployed Seller Panels (Cloudflare Workers + D1 Control) */}
               <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-wrap">
                   <div>
                     <h3 className="text-sm font-black text-zinc-900">
                       وب‌سایت‌ها و فروشگاه‌های ساخته‌شده ({sellerDeployments.length})
@@ -4291,6 +4292,18 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       اشتراک ماهانه ۲۶۰ کرون (اعتبار ۳۰ روزه، غیر دائمی) • مشاهده مشخصات شرکت، تمدید ماهانه و حذف از کلودفلر در صورت عدم پرداخت.
                     </p>
                   </div>
+                  {sellerDeployments.length > 0 && (
+                    <div className="relative w-full sm:w-64">
+                      <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={sellerSearch}
+                        onChange={(e) => setSellerSearch(e.target.value)}
+                        placeholder="جستجوی نام، کد، شرکت، تلفن..."
+                        className="w-full h-9 rounded-xl bg-stone-50 border border-stone-200/80 pr-8 pl-3 text-xs focus:bg-white focus:border-stone-400 focus:outline-none"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {sellerDeployments.length === 0 ? (
@@ -4299,7 +4312,19 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   </div>
                 ) : (
                   <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/80 overflow-hidden">
-                    {sellerDeployments.map((dep) => {
+                    {sellerDeployments
+                      .filter((dep) => {
+                        if (!sellerSearch.trim()) return true;
+                        const q = sellerSearch.toLowerCase();
+                        return (
+                          (dep.name || '').toLowerCase().includes(q) ||
+                          (dep.storeId || '').toLowerCase().includes(q) ||
+                          (dep.companyNumber || '').toLowerCase().includes(q) ||
+                          (dep.phone || '').toLowerCase().includes(q) ||
+                          (dep.email || '').toLowerCase().includes(q)
+                        );
+                      })
+                      .map((dep) => {
                       const expTime = dep.expiresAt
                         ? new Date(dep.expiresAt).getTime()
                         : (dep.createdAt ? new Date(dep.createdAt).getTime() + 30 * 24 * 60 * 60 * 1000 : Date.now());
