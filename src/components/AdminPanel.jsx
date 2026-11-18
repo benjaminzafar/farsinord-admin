@@ -553,6 +553,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [sellerDeployments, setSellerDeployments] = useState([]);
   const [sellerSearch, setSellerSearch] = useState('');
   const [deletingDeployment, setDeletingDeployment] = useState('');
+  const [websiteFilter, setWebsiteFilter] = useState('all'); // 'all' | 'pending_setup' | 'active' | 'ended'
+  const [editingSubId, setEditingSubId] = useState('');
+  const [editSubForm, setEditSubForm] = useState({ status: 'pending_setup', websiteUrl: '', panelUrl: '', adminNotes: '' });
+  const [savingSub, setSavingSub] = useState(false);
 
   const [adminTurnstileToken, setAdminTurnstileToken] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
@@ -1746,17 +1750,19 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
   // Delete a Website Builder Subscription Record
   const handleDeleteSellerDeployment = async (dep) => {
-    if (!dep?.workerName) return;
-    setDeletingDeployment(dep.workerName);
+    const keyId = dep?.storeId || dep?.workerName;
+    if (!keyId) return;
+    if (!window.confirm(`آیا از حذف اشتراک «${dep.name}» (${dep.manageCode || dep.storeId}) مطمئن هستید؟`)) return;
+    setDeletingDeployment(keyId);
     try {
-      const apiRes = await adminApi.request('delete_seller_deployment', {
-        workerName: dep.workerName,
-        dbId: dep.dbId || '',
+      const apiRes = await adminApi.request('delete_website_subscription', {
+        storeId: dep.storeId || '',
+        workerName: dep.workerName || '',
       });
       if (apiRes && apiRes.ok && Array.isArray(apiRes.seller_deployments)) {
         setSellerDeployments(apiRes.seller_deployments);
       } else {
-        const nextList = sellerDeployments.filter(d => d.workerName !== dep.workerName);
+        const nextList = sellerDeployments.filter(d => (d.storeId || d.workerName) !== keyId);
         await supabase.from('swedpersiska_settings').upsert({
           key: 'seller_deployments',
           value: nextList,
@@ -1764,9 +1770,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         });
         setSellerDeployments(nextList);
       }
-      triggerToast(`پنل فروش «${dep.name}» از کلودفلر حذف شد.`, 'success');
+      if (editingSubId === keyId) setEditingSubId('');
+      triggerToast(`اشتراک «${dep.name}» با موفقیت حذف شد.`, 'success');
     } catch (err) {
-      triggerToast('خطا در حذف پنل فروش: ' + err.message, 'error');
+      triggerToast('خطا در حذف اشتراک: ' + err.message, 'error');
     } finally {
       setDeletingDeployment('');
     }
@@ -1774,27 +1781,80 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
   // Extend 30-day Monthly Subscription (260 SEK/month)
   const handleRenewSellerDeployment = async (dep) => {
-    if (!dep?.workerName) return;
+    const keyId = dep?.storeId || dep?.workerName;
+    if (!keyId) return;
+    setSavingSub(true);
     try {
-      const baseTime = dep.expiresAt && new Date(dep.expiresAt).getTime() > Date.now()
-        ? new Date(dep.expiresAt).getTime()
-        : Date.now();
-      const nextExpiresAt = new Date(baseTime + 30 * 24 * 60 * 60 * 1000).toISOString();
-      const nextList = sellerDeployments.map((d) =>
-        d.workerName === dep.workerName ? { ...d, expiresAt: nextExpiresAt, monthlyPrice: 260 } : d
-      );
-      const apiRes = await adminApi.request('save_settings', { key: 'seller_deployments', value: nextList });
-      if (!apiRes || !apiRes.ok) {
-        await supabase.from('swedpersiska_settings').upsert({
-          key: 'seller_deployments',
-          value: nextList,
-          updated_at: new Date().toISOString(),
-        });
+      const apiRes = await adminApi.request('update_website_subscription', {
+        storeId: dep.storeId || '',
+        workerName: dep.workerName || '',
+        extendDays: 30,
+      });
+      if (apiRes && apiRes.ok && Array.isArray(apiRes.seller_deployments)) {
+        setSellerDeployments(apiRes.seller_deployments);
       }
-      setSellerDeployments(nextList);
       triggerToast(`اشتراک ۳۰ روزه «${dep.name}» تمدید شد.`, 'success');
     } catch (err) {
       triggerToast('خطا در تمدید اشتراک: ' + err.message, 'error');
+    } finally {
+      setSavingSub(false);
+    }
+  };
+
+  const handleOpenEditSub = (dep) => {
+    const keyId = dep?.storeId || dep?.workerName;
+    if (editingSubId === keyId) {
+      setEditingSubId('');
+      return;
+    }
+    setEditingSubId(keyId);
+    setEditSubForm({
+      status: dep.status || 'pending_setup',
+      websiteUrl: dep.websiteUrl || '',
+      panelUrl: dep.panelUrl || '',
+      adminNotes: dep.adminNotes || '',
+    });
+  };
+
+  const handleSaveEditSub = async (dep) => {
+    setSavingSub(true);
+    try {
+      const apiRes = await adminApi.request('update_website_subscription', {
+        storeId: dep.storeId || '',
+        workerName: dep.workerName || '',
+        status: editSubForm.status,
+        websiteUrl: editSubForm.websiteUrl,
+        panelUrl: editSubForm.panelUrl,
+        adminNotes: editSubForm.adminNotes,
+      });
+      if (apiRes && apiRes.ok && Array.isArray(apiRes.seller_deployments)) {
+        setSellerDeployments(apiRes.seller_deployments);
+      }
+      setEditingSubId('');
+      triggerToast(`تغییرات اشتراک «${dep.name}» ذخیره شد.`, 'success');
+    } catch (err) {
+      triggerToast('خطا در ذخیره اشتراک: ' + err.message, 'error');
+    } finally {
+      setSavingSub(false);
+    }
+  };
+
+  const handleQuickSubStatus = async (dep, nextStatus) => {
+    setSavingSub(true);
+    try {
+      const apiRes = await adminApi.request('update_website_subscription', {
+        storeId: dep.storeId || '',
+        workerName: dep.workerName || '',
+        status: nextStatus,
+      });
+      if (apiRes && apiRes.ok && Array.isArray(apiRes.seller_deployments)) {
+        setSellerDeployments(apiRes.seller_deployments);
+      }
+      triggerToast(`وضعیت اشتراک «${dep.name}» بروزرسانی شد.`, 'success');
+    } catch (err) {
+      triggerToast('خطا در تغییر وضعیت: ' + err.message, 'error');
+    } finally {
+      setSavingSub(false);
     }
   };
 
@@ -4101,53 +4161,111 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           {/* ========================================================
               TAB: WEBSITE BUILDER SUBSCRIPTIONS (260 SEK/MONTH)
           ======================================================== */}
-          {activeTab === 'websites' && (
+          {activeTab === 'websites' && (() => {
+            const nowMs = Date.now();
+            const pendingCount = sellerDeployments.filter((d) => d.status === 'pending_setup').length;
+            const activeCount = sellerDeployments.filter((d) => {
+              const exp = d.expiresAt ? new Date(d.expiresAt).getTime() : 0;
+              return d.status === 'active' && exp >= nowMs;
+            }).length;
+            const mrrSek = activeCount * 260;
+
+            const filteredDeployments = sellerDeployments.filter((dep) => {
+              const exp = dep.expiresAt ? new Date(dep.expiresAt).getTime() : 0;
+              const isCancelled = dep.status === 'cancelled';
+              const isExpired = exp > 0 && exp < nowMs;
+              if (websiteFilter === 'pending_setup' && dep.status !== 'pending_setup') return false;
+              if (websiteFilter === 'active' && !(dep.status === 'active' && !isExpired)) return false;
+              if (websiteFilter === 'ended' && !(isCancelled || isExpired)) return false;
+
+              if (!sellerSearch.trim()) return true;
+              const q = sellerSearch.toLowerCase();
+              return (
+                (dep.name || '').toLowerCase().includes(q) ||
+                (dep.storeId || '').toLowerCase().includes(q) ||
+                (dep.manageCode || '').toLowerCase().includes(q) ||
+                (dep.companyNumber || '').toLowerCase().includes(q) ||
+                (dep.phone || '').toLowerCase().includes(q) ||
+                (dep.email || '').toLowerCase().includes(q)
+              );
+            });
+
+            return (
             <div className="space-y-5 w-full py-1 animate-in fade-in duration-150 ease-out">
+              {/* Summary KPIs */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="rounded-2xl bg-white border border-stone-200/80 p-4">
+                  <span className="text-[11px] font-bold text-stone-500 block">کل سفارش‌ها</span>
+                  <span className="text-xl font-black text-zinc-900 tabular-nums mt-1 block">{sellerDeployments.length}</span>
+                </div>
+                <div className="rounded-2xl bg-white border border-stone-200/80 p-4">
+                  <span className="text-[11px] font-bold text-amber-700 block">در انتظار ساخت (۲۴ساعته)</span>
+                  <span className="text-xl font-black text-amber-700 tabular-nums mt-1 block">{pendingCount}</span>
+                </div>
+                <div className="rounded-2xl bg-white border border-stone-200/80 p-4">
+                  <span className="text-[11px] font-bold text-emerald-700 block">اشتراک‌های فعال</span>
+                  <span className="text-xl font-black text-emerald-700 tabular-nums mt-1 block">{activeCount}</span>
+                </div>
+                <div className="rounded-2xl bg-white border border-stone-200/80 p-4">
+                  <span className="text-[11px] font-bold text-[#0066CC] block">درآمد ماهانه فعال</span>
+                  <span className="text-xl font-black text-[#0066CC] tabular-nums mt-1 block">{mrrSek.toLocaleString('en-US')} SEK</span>
+                </div>
+              </div>
+
               {/* Website Builder Subscriptions List */}
               <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 flex-wrap">
                   <div>
                     <h3 className="text-sm font-black text-zinc-900">
-                      اشتراک‌ها و سفارش‌های ساخت وب‌سایت ({sellerDeployments.length})
+                      مدیریت اشتراک‌ها و سفارش‌های ساخت وب‌سایت ({filteredDeployments.length})
                     </h3>
                     <p className="text-xs text-stone-500 mt-0.5">
-                      اشتراک ماهانه ۲۶۰ کرون (اعتبار ۳۰ روزه) • مشاهده کد ۸ رقمی مشتری، شماره ثبت شرکت، تلفن و ایمیل.
+                      کنترل وضعیت، ثبت لینک سایت و پنل فروش مشتری، تمدید ۳۰ روزه (۲۶۰ کرون) و مشاهده کد ۸ رقمی.
                     </p>
                   </div>
-                  {sellerDeployments.length > 0 && (
-                    <div className="relative w-full sm:w-64">
-                      <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
-                      <input
-                        type="text"
-                        value={sellerSearch}
-                        onChange={(e) => setSellerSearch(e.target.value)}
-                        placeholder="جستجوی نام، کد ۸ رقمی، شرکت، تلفن..."
-                        className="w-full h-9 rounded-xl bg-stone-50 border border-stone-200/80 pr-8 pl-3 text-xs focus:bg-white focus:border-stone-400 focus:outline-none"
-                      />
-                    </div>
-                  )}
+                  <div className="relative w-full sm:w-64">
+                    <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={sellerSearch}
+                      onChange={(e) => setSellerSearch(e.target.value)}
+                      placeholder="جستجوی نام، کد ۸ رقمی، شرکت، تلفن..."
+                      className="w-full h-9 rounded-xl bg-stone-50 border border-stone-200/80 pr-8 pl-3 text-xs focus:bg-white focus:border-stone-400 focus:outline-none"
+                    />
+                  </div>
                 </div>
 
-                {sellerDeployments.length === 0 ? (
+                {/* Filter Pills */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {[
+                    { id: 'all', label: 'همه' },
+                    { id: 'pending_setup', label: `در انتظار ساخت (${pendingCount})` },
+                    { id: 'active', label: `فعال (${activeCount})` },
+                    { id: 'ended', label: 'منقضی / لغو شده' },
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setWebsiteFilter(f.id)}
+                      className={`h-8 px-3 rounded-full text-[11px] font-bold cursor-pointer transition-colors ${
+                        websiteFilter === f.id
+                          ? 'bg-zinc-900 text-white'
+                          : 'bg-stone-100 text-stone-600 hover:bg-stone-200/70'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {filteredDeployments.length === 0 ? (
                   <div className="p-6 rounded-xl bg-stone-50 border border-stone-200/70 text-center text-xs text-stone-400">
-                    هنوز هیچ سفارش اشتراک وب‌سایتی توسط کاربران ثبت نشده است.
+                    هیچ اشتراکی با این فیلتر یافت نشد.
                   </div>
                 ) : (
                   <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/80 overflow-hidden">
-                    {sellerDeployments
-                      .filter((dep) => {
-                        if (!sellerSearch.trim()) return true;
-                        const q = sellerSearch.toLowerCase();
-                        return (
-                          (dep.name || '').toLowerCase().includes(q) ||
-                          (dep.storeId || '').toLowerCase().includes(q) ||
-                          (dep.manageCode || '').toLowerCase().includes(q) ||
-                          (dep.companyNumber || '').toLowerCase().includes(q) ||
-                          (dep.phone || '').toLowerCase().includes(q) ||
-                          (dep.email || '').toLowerCase().includes(q)
-                        );
-                      })
-                      .map((dep) => {
+                    {filteredDeployments.map((dep) => {
+                      const keyId = dep.storeId || dep.workerName;
                       const isCancelled = dep.status === 'cancelled';
                       const isPendingSetup = dep.status === 'pending_setup';
                       const expTime = dep.expiresAt
@@ -4155,73 +4273,194 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                         : (dep.createdAt ? new Date(dep.createdAt).getTime() + 30 * 24 * 60 * 60 * 1000 : Date.now());
                       const isExpired = expTime < Date.now();
                       const expLabel = new Date(expTime).toLocaleDateString('fa-IR');
+                      const isEditing = editingSubId === keyId;
+
                       return (
-                      <div key={dep.workerName || dep.storeId} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-stone-50/40">
-                        <div className="min-w-0 space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-xs font-black text-zinc-900">{dep.name}</span>
-                            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-stone-200/70 text-stone-700">{dep.storeId}</span>
-                            {dep.manageCode && (
-                              <span className="font-mono text-[10.5px] font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-900">
-                                کد مدیریت: {dep.manageCode}
-                              </span>
-                            )}
-                            {isCancelled ? (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border bg-rose-50 text-rose-700 border-rose-200">
-                                لغو شده توسط کاربر
-                              </span>
-                            ) : isPendingSetup ? (
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border bg-amber-50 text-amber-800 border-amber-200">
-                                در انتظار ساخت و ارسال ایمیل (۲۴ ساعته) • تا {expLabel}
-                              </span>
-                            ) : (
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                                isExpired
-                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              }`}>
-                                {isExpired ? `منقضی (${expLabel})` : `فعال تا ${expLabel} • ۲۶۰ کرون/ماه`}
-                              </span>
-                            )}
-                            {dep.companyNumber && (
-                              <span className="text-[10.5px] font-bold text-stone-600">ثبت شرکت: <span className="font-mono">{dep.companyNumber}</span></span>
+                      <div key={keyId} className="p-4 space-y-3 bg-stone-50/30">
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                          <div className="min-w-0 space-y-1.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-black text-zinc-900">{dep.name}</span>
+                              <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-stone-200/70 text-stone-700">{dep.storeId}</span>
+                              {dep.manageCode && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(dep.manageCode);
+                                    triggerToast(`کد ۸ رقمی ${dep.manageCode} کپی شد.`, 'success');
+                                  }}
+                                  title="کپی کد ۸ رقمی"
+                                  className="font-mono text-[10.5px] font-bold px-2 py-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-900 cursor-pointer"
+                                >
+                                  کد: {dep.manageCode}
+                                </button>
+                              )}
+                              {dep.paymentStatus === 'paid' && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-[#0066CC] border border-blue-200">
+                                  پرداخت Stripe تایید شده
+                                </span>
+                              )}
+                              {dep.renewRequestedAt && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                  درخواست تمدید مشتری
+                                </span>
+                              )}
+                              {isCancelled ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border bg-rose-50 text-rose-700 border-rose-200">
+                                  لغو شده
+                                </span>
+                              ) : isPendingSetup ? (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border bg-amber-50 text-amber-800 border-amber-200">
+                                  در انتظار ساخت (۲۴ ساعته) • تا {expLabel}
+                                </span>
+                              ) : (
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                  isExpired
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                }`}>
+                                  {isExpired ? `منقضی (${expLabel})` : `فعال تا ${expLabel} • ۲۶۰ کرون/ماه`}
+                                </span>
+                              )}
+                              {dep.companyNumber && (
+                                <span className="text-[10.5px] font-bold text-stone-600">ثبت شرکت: <span className="font-mono">{dep.companyNumber}</span></span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-3 flex-wrap text-[11px] text-stone-500">
+                              {dep.phone && (
+                                <a href={`tel:${dep.phone}`} dir="ltr" className="font-mono hover:text-zinc-900">
+                                  {dep.phone}
+                                </a>
+                              )}
+                              {dep.email && (
+                                <a href={`mailto:${dep.email}`} dir="ltr" className="font-mono hover:text-[#0066CC]">
+                                  {dep.email}
+                                </a>
+                              )}
+                              {dep.websiteUrl && (
+                                <a href={dep.websiteUrl} target="_blank" rel="noopener noreferrer" className="text-[#0066CC] hover:underline font-bold">
+                                  وب‌سایت مشتری ↗
+                                </a>
+                              )}
+                              {dep.panelUrl && (
+                                <a href={dep.panelUrl} target="_blank" rel="noopener noreferrer" className="text-[#0066CC] hover:underline font-bold">
+                                  پنل فروش مشتری ↗
+                                </a>
+                              )}
+                            </div>
+
+                            {dep.adminNotes && (
+                              <p className="text-[11px] text-stone-600 bg-white border border-stone-200/70 rounded-lg px-2.5 py-1.5">
+                                یادداشت: {dep.adminNotes}
+                              </p>
                             )}
                           </div>
-                          <div className="flex items-center gap-3 flex-wrap text-[11px] text-stone-500">
-                            {dep.phone && <span dir="ltr" className="font-mono">{dep.phone}</span>}
-                            {dep.email && <span dir="ltr" className="font-mono">{dep.email}</span>}
-                          </div>
-                          {dep.panelUrl && (
-                            <a
-                              href={dep.panelUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[11px] font-mono text-[#0066CC] hover:underline truncate block"
-                              dir="ltr"
+
+                          <div className="flex items-center gap-2 flex-wrap shrink-0">
+                            {isPendingSetup && (
+                              <button
+                                type="button"
+                                disabled={savingSub}
+                                onClick={() => handleQuickSubStatus(dep, 'active')}
+                                className="h-8 px-3 rounded-lg bg-[#0066CC] hover:bg-[#0055AA] text-white text-[11px] font-bold cursor-pointer disabled:opacity-50"
+                              >
+                                تکمیل و فعال‌سازی
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditSub(dep)}
+                              className="h-8 px-3 rounded-lg bg-white hover:bg-stone-100 text-zinc-800 border border-stone-200 text-[11px] font-bold cursor-pointer"
                             >
-                              {dep.panelUrl}
-                            </a>
-                          )}
+                              {isEditing ? 'بستن ویرایش' : 'مدیریت و لینک‌ها'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={savingSub}
+                              onClick={() => handleRenewSellerDeployment(dep)}
+                              className="h-8 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold cursor-pointer disabled:opacity-50"
+                            >
+                              تمدید ۳۰ روز
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deletingDeployment === keyId}
+                              onClick={() => handleDeleteSellerDeployment(dep)}
+                              className="h-8 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                            >
+                              <Trash2 size={13} />
+                              <span>{deletingDeployment === keyId ? 'حذف...' : 'حذف'}</span>
+                            </button>
+                          </div>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleRenewSellerDeployment(dep)}
-                            className="h-8 px-3 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer"
-                          >
-                            <span>تمدید ۳۰ روز</span>
-                          </button>
-                          <button
-                            type="button"
-                            disabled={deletingDeployment === dep.workerName}
-                            onClick={() => handleDeleteSellerDeployment(dep)}
-                            className="h-8 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                          >
-                            <Trash2 size={13} />
-                            <span>{deletingDeployment === dep.workerName ? 'در حال حذف...' : 'حذف از کلودفلر'}</span>
-                          </button>
-                        </div>
+                        {/* Inline Admin Control Editor */}
+                        {isEditing && (
+                          <div className="pt-3 border-t border-stone-200/80 grid grid-cols-1 sm:grid-cols-2 gap-3 bg-white p-3.5 rounded-xl border">
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">وضعیت اشتراک</label>
+                              <select
+                                value={editSubForm.status}
+                                onChange={(e) => setEditSubForm((p) => ({ ...p, status: e.target.value }))}
+                                className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs"
+                              >
+                                <option value="pending_setup">در انتظار ساخت (۲۴ ساعته)</option>
+                                <option value="active">فعال</option>
+                                <option value="cancelled">لغو شده</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">لینک وب‌سایت مشتری</label>
+                              <input
+                                type="url"
+                                dir="ltr"
+                                value={editSubForm.websiteUrl}
+                                onChange={(e) => setEditSubForm((p) => ({ ...p, websiteUrl: e.target.value }))}
+                                placeholder="https://example.se"
+                                className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono text-left"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">لینک پنل فروش مشتری</label>
+                              <input
+                                type="url"
+                                dir="ltr"
+                                value={editSubForm.panelUrl}
+                                onChange={(e) => setEditSubForm((p) => ({ ...p, panelUrl: e.target.value }))}
+                                placeholder="https://panel.example.se"
+                                className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs font-mono text-left"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-stone-700 mb-1">یادداشت ادمین (ربات تلگرام، دامنه، فاکتور)</label>
+                              <input
+                                type="text"
+                                value={editSubForm.adminNotes}
+                                onChange={(e) => setEditSubForm((p) => ({ ...p, adminNotes: e.target.value }))}
+                                placeholder="مثلاً: دامنه وصل شد، ربات تلگرام فعال"
+                                className="w-full h-9 rounded-lg bg-stone-50 border border-stone-200 px-2.5 text-xs"
+                              />
+                            </div>
+                            <div className="sm:col-span-2 flex justify-end gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => setEditingSubId('')}
+                                className="h-9 px-4 rounded-lg bg-stone-100 text-stone-700 text-xs font-bold cursor-pointer"
+                              >
+                                انصراف
+                              </button>
+                              <button
+                                type="button"
+                                disabled={savingSub}
+                                onClick={() => handleSaveEditSub(dep)}
+                                className="h-9 px-5 rounded-lg bg-[#0066CC] hover:bg-[#0055AA] text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+                              >
+                                {savingSub ? 'در حال ذخیره...' : 'ذخیره تغییرات'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       );
                     })}
@@ -4229,7 +4468,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 )}
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* ========================================================
               TAB 3: SETTINGS (BRANDING, SEO & COUNTRIES, STRIPE, SECURITY)

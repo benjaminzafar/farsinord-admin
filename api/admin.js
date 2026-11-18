@@ -593,6 +593,94 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, seller_deployments: nextList });
     }
 
+    if (action === 'update_website_subscription') {
+      const storeId = String(body.storeId || '').trim();
+      const workerName = String(body.workerName || '').trim();
+      if (!storeId && !workerName) {
+        return res.status(400).json({ ok: false, error: 'شناسه اشتراک الزامی است.' });
+      }
+
+      const { data: depRow } = await supabase
+        .from('swedpersiska_settings')
+        .select('value')
+        .eq('key', 'seller_deployments')
+        .maybeSingle();
+      const prevList = Array.isArray(depRow?.value) ? depRow.value : [];
+      const idx = prevList.findIndex(
+        (x) => (storeId && x.storeId === storeId) || (workerName && x.workerName === workerName)
+      );
+      if (idx === -1) {
+        return res.status(404).json({ ok: false, error: 'اشتراک یافت نشد.' });
+      }
+
+      const current = prevList[idx];
+      const next = { ...current };
+
+      if (typeof body.status === 'string' && ['pending_setup', 'active', 'cancelled'].includes(body.status)) {
+        next.status = body.status;
+      }
+
+      const sanitizeUrl = (val) => {
+        const s = String(val || '').trim().slice(0, 300);
+        if (!s) return '';
+        try {
+          const u = new URL(s.startsWith('http') ? s : `https://${s}`);
+          if (u.protocol === 'https:' || u.protocol === 'http:') return u.toString();
+        } catch {}
+        return '';
+      };
+
+      if (body.websiteUrl !== undefined) next.websiteUrl = sanitizeUrl(body.websiteUrl);
+      if (body.panelUrl !== undefined) next.panelUrl = sanitizeUrl(body.panelUrl);
+      if (body.adminNotes !== undefined) next.adminNotes = String(body.adminNotes || '').trim().slice(0, 500);
+
+      const extendDays = Number(body.extendDays || 0);
+      if (extendDays > 0 && extendDays <= 365) {
+        const baseTime = current.expiresAt && new Date(current.expiresAt).getTime() > Date.now()
+          ? new Date(current.expiresAt).getTime()
+          : Date.now();
+        next.expiresAt = new Date(baseTime + extendDays * 24 * 60 * 60 * 1000).toISOString();
+        next.renewRequestedAt = '';
+        if (next.status === 'cancelled') next.status = 'active';
+      }
+
+      next.updatedAt = new Date().toISOString();
+      const nextList = prevList.map((item, i) => (i === idx ? next : item));
+      await supabase.from('swedpersiska_settings').upsert({
+        key: 'seller_deployments',
+        value: nextList,
+        updated_at: new Date().toISOString(),
+      });
+
+      return res.status(200).json({ ok: true, seller_deployments: nextList, subscription: next });
+    }
+
+    if (action === 'delete_website_subscription') {
+      const storeId = String(body.storeId || '').trim();
+      const workerName = String(body.workerName || '').trim();
+      if (!storeId && !workerName) {
+        return res.status(400).json({ ok: false, error: 'شناسه اشتراک الزامی است.' });
+      }
+
+      const { data: depRow } = await supabase
+        .from('swedpersiska_settings')
+        .select('value')
+        .eq('key', 'seller_deployments')
+        .maybeSingle();
+      const prevList = Array.isArray(depRow?.value) ? depRow.value : [];
+      const nextList = prevList.filter(
+        (x) => !((storeId && x.storeId === storeId) || (workerName && x.workerName === workerName))
+      );
+
+      await supabase.from('swedpersiska_settings').upsert({
+        key: 'seller_deployments',
+        value: nextList,
+        updated_at: new Date().toISOString(),
+      });
+
+      return res.status(200).json({ ok: true, seller_deployments: nextList });
+    }
+
     return res.status(400).json({ ok: false, error: 'Unknown admin action' });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message || 'Internal Server Error' });
