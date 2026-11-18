@@ -156,12 +156,15 @@ export default async function handler(req, res) {
 
     // 3. Protected Admin Actions
     if (action === 'overview') {
-      const [totalRes, activeRes, pendingRes, vipRes, recentRes, metaRes, settingsRes] = await Promise.all([
-        supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }),
-        supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('status', 'active'),
-        supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-        supabase.from('swedpersiska_ads').select('*', { count: 'exact', head: true }).eq('is_featured', true),
-        supabase.from('swedpersiska_ads').select('*').eq('status', 'active').order('created_at', { ascending: false }).limit(5),
+      const [firstPageRes, metaRes, settingsRes] = await Promise.all([
+        supabase
+          .from('swedpersiska_ads')
+          .select('*')
+          .eq('status', 'active')
+          .order('is_featured', { ascending: false })
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .range(0, PAGE_SIZE - 1),
         supabase.from('swedpersiska_ads').select('category, country, status, is_featured, views_count'),
         supabase.from('swedpersiska_settings').select('*')
       ]);
@@ -177,14 +180,27 @@ export default async function handler(req, res) {
         fr: { total: 0, active: 0, vip: 0, views: 0 }
       };
       const categoryCounts = {};
+      let totalCount = 0;
+      let activeCount = 0;
+      let pendingCount = 0;
+      let vipCount = 0;
       let totalViews = 0;
 
       (metaRes.data || []).forEach((row) => {
+        totalCount++;
         const c = row.country || 'se';
         if (!countryStats[c]) countryStats[c] = { total: 0, active: 0, vip: 0, views: 0 };
         countryStats[c].total++;
-        if (row.status === 'active') countryStats[c].active++;
-        if (row.is_featured) countryStats[c].vip++;
+        if (row.status === 'active') {
+          activeCount++;
+          countryStats[c].active++;
+        } else if (row.status === 'pending') {
+          pendingCount++;
+        }
+        if (row.is_featured) {
+          vipCount++;
+          countryStats[c].vip++;
+        }
         countryStats[c].views += row.views_count || 1;
         totalViews += row.views_count || 1;
         if (row.category) {
@@ -192,18 +208,21 @@ export default async function handler(req, res) {
         }
       });
 
+      const firstPageAds = firstPageRes.data || [];
+
       return res.status(200).json({
         ok: true,
         counts: {
-          total: totalRes.count ?? 0,
-          active: activeRes.count ?? 0,
-          pending: pendingRes.count ?? 0,
-          vip: vipRes.count ?? 0,
+          total: totalCount,
+          active: activeCount,
+          pending: pendingCount,
+          vip: vipCount,
           totalViews
         },
         countryStats,
         categoryCounts,
-        recentActiveAds: recentRes.data || [],
+        recentActiveAds: firstPageAds.slice(0, 5),
+        initialActiveAds: firstPageAds,
         settings: (settingsRes.data || []).map((item) => {
           if (item.key === 'r2_settings' && item.value && typeof item.value === 'object') {
             return {

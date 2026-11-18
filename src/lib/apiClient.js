@@ -90,22 +90,21 @@ export const adminApi = {
 
   async request(action, payload = {}) {
     const token = this.getToken();
+    if (!token || token.startsWith('local.')) {
+      return null;
+    }
     try {
       const res = await fetch(`${API_BASE}/api/admin`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
+          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ action, ...payload })
       });
       const contentType = res.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
         const json = await res.json();
-        if (res.status === 401) {
-          this.setToken('');
-          return { ok: false, unauthorized: true };
-        }
         if (json && json.ok) return json;
       }
     } catch {}
