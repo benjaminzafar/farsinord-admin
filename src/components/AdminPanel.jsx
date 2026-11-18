@@ -2509,298 +2509,326 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 </button>
               </div>
 
-              {/* 1.5. REVENUE & VIP TREND CHART (Zero-dependency, Fast & Interactive) */}
-              <div className="rounded-2xl border border-stone-200/80 bg-white p-4 sm:p-5 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-xs sm:text-sm font-black text-zinc-900">چارت درآمد و آگهی‌های ویژه (VIP)</h3>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80 text-[10.5px] font-bold tabular-nums">
-                        {vipAds} ویژه × {revenueChartData.unitPrice} {revenueChartData.currency}
-                      </span>
-                    </div>
-                    <div className="flex items-baseline gap-2 mt-1">
-                      <span className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums" dir="ltr">
-                        {revenueChartData.totalVipRevenue.toLocaleString('en-US')} {revenueChartData.currency}
-                      </span>
-                      <span className="text-[11px] text-stone-400">درآمد تخمینی از آگهی‌های ویژه</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
-                    <div className="inline-flex items-center rounded-xl bg-stone-100 p-1 border border-stone-200/80">
-                      <button
-                        type="button"
-                        onClick={() => { setRevenueChartView('monthly'); setActiveChartIdx(null); }}
-                        className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
-                          revenueChartView === 'monthly'
-                            ? 'bg-white text-zinc-900 shadow-sm'
-                            : 'text-stone-500 hover:text-zinc-900'
-                        }`}
-                      >
-                        روند ۶ ماهه
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { setRevenueChartView('country'); setActiveChartIdx(null); }}
-                        className={`px-3 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
-                          revenueChartView === 'country'
-                            ? 'bg-white text-zinc-900 shadow-sm'
-                            : 'text-stone-500 hover:text-zinc-900'
-                        }`}
-                      >
-                        تفکیک کشورها
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handleTabChange('monetization')}
-                      className="h-8 px-2.5 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-[11px] font-bold text-stone-700 cursor-pointer"
-                    >
-                      تنظیم تعرفه
-                    </button>
-                  </div>
-                </div>
-
-                {/* Selected / Hovered Bar Detail Strip */}
-                {(() => {
-                  const selectedBar =
-                    activeChartIdx !== null && revenueChartData.series[activeChartIdx]
-                      ? revenueChartData.series[activeChartIdx]
-                      : revenueChartData.series[revenueChartData.series.length - 1];
-                  if (!selectedBar) return null;
-                  return (
-                    <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-stone-50 border border-stone-200/70 text-[11px]">
-                      <div className="flex items-center gap-2 font-bold text-zinc-800">
-                        <span className="h-2 w-2 rounded-full bg-[#0066CC]" />
-                        <span>{selectedBar.label}</span>
+              {/* 2. ROW 2: TWO-COLUMN DASHBOARD — RIGHT: Countries & Recent Ads | LEFT: Beautiful Revenue Chart */}
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-stretch">
+                
+                {/* RIGHT SIDE (RTL Col 1): Country Stats + Recent Ads */}
+                <div className="xl:col-span-6 flex flex-col gap-4 min-w-0">
+                  
+                  {/* Compact 8-Country Breakdown */}
+                  <div className="rounded-2xl border border-stone-200/80 bg-white p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xs font-black text-zinc-900">آمار کشورها ({countriesList.length} کشور)</h3>
                       </div>
-                      <div className="flex items-center gap-3 tabular-nums">
-                        <span className="text-stone-500">
-                          کل آگهی: <strong className="text-zinc-900">{selectedBar.totalAds}</strong>
-                        </span>
-                        <span className="text-amber-700">
-                          ویژه: <strong>{selectedBar.vipAds}</strong>
-                        </span>
-                        <span className="font-black text-emerald-700" dir="ltr">
-                          {selectedBar.revenue.toLocaleString('en-US')} {revenueChartData.currency}
-                        </span>
-                      </div>
+                      <span className="text-[11px] text-stone-400">کلیک برای فیلتر کشور</span>
                     </div>
-                  );
-                })()}
 
-                {/* Lightweight Responsive Column Chart */}
-                <div className="relative pt-2">
-                  {/* Subtle horizontal guide lines */}
-                  <div className="pointer-events-none absolute inset-x-0 top-2 bottom-7 flex flex-col justify-between">
-                    <div className="border-b border-dashed border-stone-200/70 w-full" />
-                    <div className="border-b border-dashed border-stone-200/70 w-full" />
-                    <div className="border-b border-stone-200 w-full" />
-                  </div>
-
-                  <div
-                    className={`relative z-10 grid gap-1.5 sm:gap-3 items-end h-40 sm:h-44 ${
-                      revenueChartView === 'country' ? 'grid-cols-8' : 'grid-cols-6'
-                    }`}
-                  >
-                    {revenueChartData.series.map((item, idx) => {
-                      const revPct = item.revenue > 0 ? Math.max(10, Math.round((item.revenue / revenueChartData.maxRevenue) * 100)) : 0;
-                      const adsPct = item.totalAds > 0 ? Math.max(8, Math.round((item.totalAds / revenueChartData.maxTotalAds) * 100)) : 4;
-                      const isActive = activeChartIdx === idx;
-                      return (
-                        <button
-                          key={item.key}
-                          type="button"
-                          onMouseEnter={() => setActiveChartIdx(idx)}
-                          onClick={() => setActiveChartIdx(idx)}
-                          className="group flex flex-col items-center justify-end h-full gap-1.5 cursor-pointer focus:outline-none min-w-0"
-                        >
-                          <span className="text-[9.5px] sm:text-[10px] font-bold text-stone-500 tabular-nums h-4 leading-4 truncate max-w-full">
-                            {item.revenue > 0 ? `${item.revenue}` : item.totalAds > 0 ? `${item.totalAds}` : '۰'}
-                          </span>
-                          <div className="relative w-full max-w-[38px] flex-1 flex items-end justify-center gap-0.5 sm:gap-1">
-                            {/* Total ads subtle bar */}
-                            <div
-                              style={{ height: `${adsPct}%` }}
-                              className="w-2 sm:w-3 rounded-t-md bg-stone-200/80 group-hover:bg-stone-300 transition-all duration-200"
-                              title={`کل آگهی‌ها: ${item.totalAds}`}
-                            />
-                            {/* VIP Revenue primary bar */}
-                            <div
-                              style={{ height: `${revPct || 4}%` }}
-                              className={`w-3 sm:w-4 rounded-t-lg transition-all duration-200 ${
-                                item.revenue > 0
-                                  ? isActive
-                                    ? 'bg-[#0055AA] shadow-sm'
-                                    : 'bg-gradient-to-t from-[#0066CC] to-[#38bdf8] group-hover:from-[#0055AA] group-hover:to-[#0ea5e9]'
-                                  : 'bg-stone-100'
-                              }`}
-                              title={`درآمد VIP: ${item.revenue} ${revenueChartData.currency}`}
-                            />
-                          </div>
-                          <span
-                            className={`text-[10.5px] font-bold truncate max-w-full ${
-                              isActive ? 'text-[#0066CC]' : 'text-stone-600'
-                            }`}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-2 2xl:grid-cols-4 gap-2">
+                      {countriesList.map(country => {
+                        const stats = getCountryStats(country.id);
+                        return (
+                          <button
+                            key={country.id}
+                            type="button"
+                            onClick={() => {
+                              setCountryFilter(country.id);
+                              handleTabChange('ads');
+                              fetchActiveAds(1, searchQuery, country.id, categoryFilter, adStatusFilter, vipOnlyFilter);
+                            }}
+                            className="px-2.5 py-2 rounded-xl border border-stone-200/80 hover:border-blue-400 bg-stone-50/60 hover:bg-white transition-colors cursor-pointer flex items-center justify-between gap-1.5 text-right"
                           >
-                            {item.label}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Legend */}
-                  <div className="flex items-center justify-end gap-4 mt-2 text-[10.5px] text-stone-500">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-sm bg-[#0066CC]" />
-                      <span>درآمد آگهی‌های ویژه ({revenueChartData.currency})</span>
-                    </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-sm bg-stone-300" />
-                      <span>تعداد کل آگهی‌ها</span>
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. ROW 2: Compact 8-Country Breakdown */}
-              <div className="rounded-2xl border border-stone-200/80 bg-white p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xs font-black text-zinc-900">آمار کشورها ({countriesList.length} کشور)</h3>
-                  </div>
-                  <span className="text-[11px] text-stone-400">کلیک برای فیلتر کشور</span>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  {countriesList.map(country => {
-                    const stats = getCountryStats(country.id);
-                    return (
-                      <button
-                        key={country.id}
-                        type="button"
-                        onClick={() => {
-                          setCountryFilter(country.id);
-                          handleTabChange('ads');
-                          fetchActiveAds(1, searchQuery, country.id, categoryFilter, adStatusFilter, vipOnlyFilter);
-                        }}
-                        className="px-3 py-2.5 rounded-xl border border-stone-200/80 hover:border-blue-400 bg-stone-50/60 hover:bg-white transition-colors cursor-pointer flex items-center justify-between gap-2 text-right"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {renderCountryFlag(country.id)}
-                          <span className="font-bold text-xs text-stone-900 truncate">
-                            {country.nameFa}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0 text-[11px] tabular-nums">
-                          <span className="font-bold text-stone-800">{stats.active}</span>
-                          {stats.vip > 0 && (
-                            <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
-                              {stats.vip} ویژه
-                            </span>
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 3. ROW 3: Clean Full-Width Recent Ads List */}
-              <div className="rounded-2xl border border-stone-200/80 bg-white p-4 sm:p-5 space-y-3.5">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-black text-stone-900">آخرین آگهی‌های ثبت‌شده</h2>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleTabChange('ads')}
-                    className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 cursor-pointer"
-                  >
-                    <span>مشاهده همه ({counts.active})</span>
-                    <span>←</span>
-                  </button>
-                </div>
-
-                <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/70 overflow-hidden">
-                  {recentActiveAds.map(ad => {
-                    const countryObj = countriesList.find(c => c.id === (ad.country || 'se')) || countriesList[0];
-                    const catObj = categoriesList.find(c => c.id === ad.category) || CATEGORIES.find(c => c.id === ad.category);
-                    return (
-                      <div
-                        key={ad.id}
-                        className="w-full p-3 flex items-center justify-between gap-3 text-right hover:bg-stone-50 transition-colors"
-                      >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <div 
-                            onClick={() => setSelectedAdForModal(ad)}
-                            className="w-11 h-11 rounded-xl bg-stone-100 border border-stone-200/80 overflow-hidden shrink-0 cursor-pointer"
-                          >
-                            {ad.images && ad.images[0] ? (
-                              <img src={ad.images[0]} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-stone-300">
-                                <ImageIcon size={16} />
-                              </div>
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-stone-100 text-stone-700 shrink-0">
-                                {renderCountryFlag(ad.country || 'se')}
-                                <span>{countryObj.nameFa}</span>
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              {renderCountryFlag(country.id)}
+                              <span className="font-bold text-xs text-stone-900 truncate">
+                                {country.nameFa}
                               </span>
-                              {ad.is_featured && (
-                                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200/70 shrink-0">
-                                  ویژه
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0 text-[11px] tabular-nums">
+                              <span className="font-bold text-stone-800">{stats.active}</span>
+                              {stats.vip > 0 && (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold">
+                                  {stats.vip}★
                                 </span>
                               )}
-                              {catObj && (
-                                <span className="text-[10.5px] text-stone-400">· {catObj.fa}</span>
-                              )}
                             </div>
-                            <p 
-                              onClick={() => setSelectedAdForModal(ad)}
-                              className="text-xs font-bold text-stone-900 hover:text-blue-600 truncate mt-1 cursor-pointer"
-                            >
-                              {ad.title}
-                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Clean Recent Ads List */}
+                  <div className="flex-1 rounded-2xl border border-stone-200/80 bg-white p-4 space-y-3 flex flex-col">
+                    <div className="flex items-center justify-between gap-3">
+                      <h2 className="text-xs sm:text-sm font-black text-stone-900">آخرین آگهی‌های ثبت‌شده</h2>
+                      <button
+                        type="button"
+                        onClick={() => handleTabChange('ads')}
+                        className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800 cursor-pointer"
+                      >
+                        <span>مشاهده همه ({counts.active})</span>
+                        <span>←</span>
+                      </button>
+                    </div>
+
+                    <div className="divide-y divide-stone-100 rounded-xl border border-stone-200/70 overflow-hidden">
+                      {recentActiveAds.map(ad => {
+                        const countryObj = countriesList.find(c => c.id === (ad.country || 'se')) || countriesList[0];
+                        const catObj = categoriesList.find(c => c.id === ad.category) || CATEGORIES.find(c => c.id === ad.category);
+                        return (
+                          <div
+                            key={ad.id}
+                            className="w-full p-2.5 flex items-center justify-between gap-2.5 text-right hover:bg-stone-50 transition-colors"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                              <div 
+                                onClick={() => setSelectedAdForModal(ad)}
+                                className="w-10 h-10 rounded-xl bg-stone-100 border border-stone-200/80 overflow-hidden shrink-0 cursor-pointer"
+                              >
+                                {ad.images && ad.images[0] ? (
+                                  <img src={ad.images[0]} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-stone-300">
+                                    <ImageIcon size={15} />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-stone-100 text-stone-700 shrink-0">
+                                    {renderCountryFlag(ad.country || 'se')}
+                                    <span>{countryObj.nameFa}</span>
+                                  </span>
+                                  {ad.is_featured && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200/70 shrink-0">
+                                      ویژه
+                                    </span>
+                                  )}
+                                  {catObj && (
+                                    <span className="text-[10.5px] text-stone-400">· {catObj.fa}</span>
+                                  )}
+                                </div>
+                                <p 
+                                  onClick={() => setSelectedAdForModal(ad)}
+                                  className="text-xs font-bold text-stone-900 hover:text-blue-600 truncate mt-0.5 cursor-pointer"
+                                >
+                                  {ad.title}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedAdForModal(ad)}
+                                className="h-8 px-2.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11px] font-bold cursor-pointer"
+                              >
+                                مشاهده
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => toggleFeatured(ad)}
+                                className={`h-8 w-8 shrink-0 rounded-lg border flex items-center justify-center cursor-pointer ${
+                                  ad.is_featured
+                                    ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                    : 'bg-white hover:bg-stone-50 text-stone-400 border-stone-200'
+                                }`}
+                                title={ad.is_featured ? 'حذف نشان ویژه' : 'ارتقا به ویژه'}
+                              >
+                                <Sparkles size={13} className={ad.is_featured ? 'text-amber-600' : 'text-stone-400'} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {recentActiveAds.length === 0 && (
+                        <div className="py-8 text-center text-xs text-stone-400">
+                          هنوز آگهی فعالی در سیستم ثبت نشده است.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* LEFT SIDE (RTL Col 2): Beautiful Revenue & VIP Chart */}
+                <div className="xl:col-span-6 flex flex-col min-w-0">
+                  <div className="flex-1 rounded-2xl border border-stone-200/80 bg-white p-4 sm:p-5 flex flex-col justify-between gap-4">
+                    
+                    {/* Top Header */}
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#0066CC] to-[#0ea5e9] text-white shadow-sm">
+                            <WalletCards size={18} />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h3 className="text-xs sm:text-sm font-black text-zinc-900">چارت درآمد و آگهی‌های ویژه</h3>
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200/80 text-[10px] font-bold tabular-nums">
+                                {vipAds} ویژه × {revenueChartData.unitPrice} {revenueChartData.currency}
+                              </span>
+                            </div>
+                            <div className="flex items-baseline gap-2 mt-0.5">
+                              <span className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums" dir="ltr">
+                                {revenueChartData.totalVipRevenue.toLocaleString('en-US')} {revenueChartData.currency}
+                              </span>
+                              <span className="text-[11px] text-stone-400">درآمد کل تخمینی VIP</span>
+                            </div>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1.5 shrink-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <div className="inline-flex items-center rounded-xl bg-stone-100 p-1 border border-stone-200/80">
+                            <button
+                              type="button"
+                              onClick={() => { setRevenueChartView('monthly'); setActiveChartIdx(null); }}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                                revenueChartView === 'monthly'
+                                  ? 'bg-white text-zinc-900 shadow-sm'
+                                  : 'text-stone-500 hover:text-zinc-900'
+                              }`}
+                            >
+                              ۶ ماهه
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setRevenueChartView('country'); setActiveChartIdx(null); }}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors cursor-pointer ${
+                                revenueChartView === 'country'
+                                  ? 'bg-white text-zinc-900 shadow-sm'
+                                  : 'text-stone-500 hover:text-zinc-900'
+                              }`}
+                            >
+                              کشورها
+                            </button>
+                          </div>
                           <button
                             type="button"
-                            onClick={() => setSelectedAdForModal(ad)}
-                            className="h-8 px-2.5 rounded-lg bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11px] font-bold cursor-pointer"
+                            onClick={() => handleTabChange('monetization')}
+                            className="h-8 px-2.5 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-[11px] font-bold text-stone-700 cursor-pointer"
                           >
-                            مشاهده
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => toggleFeatured(ad)}
-                            className={`h-8 w-8 shrink-0 rounded-lg border flex items-center justify-center cursor-pointer ${
-                              ad.is_featured
-                                ? 'bg-amber-50 text-amber-800 border-amber-300'
-                                : 'bg-white hover:bg-stone-50 text-stone-400 border-stone-200'
-                            }`}
-                            title={ad.is_featured ? 'حذف نشان ویژه' : 'ارتقا به ویژه'}
-                          >
-                            <Sparkles size={13} className={ad.is_featured ? 'text-amber-600' : 'text-stone-400'} />
+                            تعرفه
                           </button>
                         </div>
                       </div>
-                    );
-                  })}
-                  {recentActiveAds.length === 0 && (
-                    <div className="py-8 text-center text-xs text-stone-400">
-                      هنوز آگهی فعالی در سیستم ثبت نشده است.
+
+                      {/* Selected / Hovered Column Summary Strip */}
+                      {(() => {
+                        const defaultIdx = revenueChartView === 'monthly' ? revenueChartData.series.length - 1 : 0;
+                        const resolvedIdx = activeChartIdx !== null && revenueChartData.series[activeChartIdx] ? activeChartIdx : defaultIdx;
+                        const selectedBar = revenueChartData.series[resolvedIdx];
+                        if (!selectedBar) return null;
+                        return (
+                          <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-gradient-to-l from-stone-50 to-blue-50/40 border border-stone-200/80 text-[11px]">
+                            <div className="flex items-center gap-2 font-black text-zinc-900">
+                              <span className="h-2 w-2 rounded-full bg-[#0066CC]" />
+                              <span>{selectedBar.label}</span>
+                            </div>
+                            <div className="flex items-center gap-3 tabular-nums">
+                              <span className="text-stone-500">
+                                کل آگهی: <strong className="text-zinc-900">{selectedBar.totalAds}</strong>
+                              </span>
+                              <span className="text-amber-700">
+                                ویژه: <strong>{selectedBar.vipAds}</strong>
+                              </span>
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-100/80 text-emerald-800 font-black" dir="ltr">
+                                {selectedBar.revenue.toLocaleString('en-US')} {revenueChartData.currency}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
-                  )}
+
+                    {/* Sleek Tracked Column Chart */}
+                    <div className="flex-1 flex flex-col justify-end pt-2">
+                      <div
+                        className={`grid gap-1.5 sm:gap-2 items-end h-52 sm:h-60 ${
+                          revenueChartView === 'country' ? 'grid-cols-8' : 'grid-cols-6'
+                        }`}
+                      >
+                        {revenueChartData.series.map((item, idx) => {
+                          const revPct = item.revenue > 0 ? Math.max(12, Math.round((item.revenue / revenueChartData.maxRevenue) * 100)) : 0;
+                          const adsPct = item.totalAds > 0 ? Math.max(10, Math.round((item.totalAds / revenueChartData.maxTotalAds) * 100)) : 0;
+                          const defaultIdx = revenueChartView === 'monthly' ? revenueChartData.series.length - 1 : 0;
+                          const isActive = (activeChartIdx !== null ? activeChartIdx : defaultIdx) === idx;
+                          return (
+                            <button
+                              key={item.key}
+                              type="button"
+                              onMouseEnter={() => setActiveChartIdx(idx)}
+                              onClick={() => setActiveChartIdx(idx)}
+                              className={`group flex flex-col items-center justify-end h-full gap-2 rounded-2xl p-1.5 sm:p-2 transition-all cursor-pointer focus:outline-none min-w-0 ${
+                                isActive
+                                  ? 'bg-blue-50/60 ring-1 ring-[#0066CC]/25'
+                                  : 'bg-stone-50/80 hover:bg-stone-100/80'
+                              }`}
+                            >
+                              <span
+                                className={`text-[10px] font-bold tabular-nums h-4 leading-4 truncate max-w-full ${
+                                  isActive ? 'text-[#0066CC]' : 'text-stone-500'
+                                }`}
+                              >
+                                {item.revenue > 0 ? `${item.revenue}` : item.totalAds > 0 ? `${item.totalAds}` : '۰'}
+                              </span>
+
+                              <div className="relative w-full flex-1 flex items-end justify-center gap-1 px-0.5">
+                                {/* Total ads track bar */}
+                                <div
+                                  style={{ height: `${adsPct || 6}%` }}
+                                  className={`w-2 sm:w-2.5 rounded-full transition-all duration-300 ${
+                                    item.totalAds > 0
+                                      ? 'bg-stone-300 group-hover:bg-stone-400'
+                                      : 'bg-stone-200/60'
+                                  }`}
+                                  title={`کل آگهی‌ها: ${item.totalAds}`}
+                                />
+                                {/* VIP Revenue gradient bar */}
+                                <div
+                                  style={{ height: `${revPct || 6}%` }}
+                                  className={`w-2.5 sm:w-3.5 rounded-full transition-all duration-300 ${
+                                    item.revenue > 0
+                                      ? 'bg-gradient-to-t from-[#0066CC] via-[#0ea5e9] to-[#38bdf8] shadow-[0_4px_12px_rgba(0,102,204,0.28)]'
+                                      : 'bg-stone-200/60'
+                                  }`}
+                                  title={`درآمد VIP: ${item.revenue} ${revenueChartData.currency}`}
+                                />
+                              </div>
+
+                              <span
+                                className={`text-[10px] sm:text-[11px] font-bold truncate max-w-full ${
+                                  isActive ? 'text-[#0066CC]' : 'text-stone-600'
+                                }`}
+                              >
+                                {item.label}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Footer Legend */}
+                      <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-stone-100 text-[10.5px] text-stone-500 flex-wrap">
+                        <div className="flex items-center gap-3.5">
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="h-2.5 w-2.5 rounded-full bg-gradient-to-t from-[#0066CC] to-[#38bdf8]" />
+                            <span>درآمد VIP ({revenueChartData.currency})</span>
+                          </span>
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className="h-2.5 w-2.5 rounded-full bg-stone-300" />
+                            <span>تعداد آگهی‌ها</span>
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-stone-400">روی هر ستون کلیک یا هاور کنید</span>
+                      </div>
+                    </div>
+
+                  </div>
                 </div>
+
               </div>
 
             </div>
