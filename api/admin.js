@@ -745,6 +745,86 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, seller_deployments: nextList, subscription: next });
     }
 
+    if (action === 'generate_website_invoice_link') {
+      const storeId = String(body.storeId || '').trim();
+      const workerName = String(body.workerName || '').trim();
+      if (!storeId && !workerName) {
+        return res.status(400).json({ ok: false, error: 'شناسه اشتراک الزامی است.' });
+      }
+
+      const { data: depRow } = await supabase
+        .from('swedpersiska_settings')
+        .select('value')
+        .eq('key', 'seller_deployments')
+        .maybeSingle();
+      const prevList = Array.isArray(depRow?.value) ? depRow.value : [];
+      const idx = prevList.findIndex(
+        (x) => (storeId && x.storeId === storeId) || (workerName && x.workerName === workerName)
+      );
+      if (idx === -1) {
+        return res.status(404).json({ ok: false, error: 'اشتراک یافت نشد.' });
+      }
+
+      const current = prevList[idx];
+      const secretKey = String(process.env.STRIPE_SECRET_KEY || '').trim();
+      let invoiceUrl = current.stripeInvoiceLink || 'https://swedpersiska.vercel.app/?page=website-builder';
+      let isStripeLive = false;
+
+      if (secretKey) {
+        const params = new URLSearchParams();
+        params.set('mode', 'payment');
+        params.set('success_url', 'https://swedpersiska.vercel.app/?page=website-builder&renew_session_id={CHECKOUT_SESSION_ID}');
+        params.set('cancel_url', 'https://swedpersiska.vercel.app/?page=website-builder&cancelled=1');
+        if (current.email) params.set('customer_email', current.email);
+        params.set('line_items[0][price_data][currency]', 'sek');
+        params.set('line_items[0][price_data][unit_amount]', '26000');
+        params.set('line_items[0][price_data][product_data][name]', `تمدید ماهانه اشتراک وب‌سایت (${current.name})`);
+        params.set('line_items[0][quantity]', '1');
+        params.set('metadata[type]', 'website_builder_renew');
+        params.set('metadata[manageCode]', String(current.manageCode || ''));
+
+        const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${secretKey}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: params.toString(),
+        });
+        const stripeJson = await stripeRes.json().catch(() => ({}));
+        if (!stripeRes.ok || !stripeJson?.url) {
+          return res.status(502).json({
+            ok: false,
+            error: stripeJson?.error?.message || 'خطا در تولید خودکار لینک پرداخت Stripe',
+          });
+        }
+        invoiceUrl = stripeJson.url;
+        isStripeLive = true;
+      }
+
+      const nowIso = new Date().toISOString();
+      const next = {
+        ...current,
+        stripeInvoiceLink: invoiceUrl,
+        invoiceSentAt: nowIso,
+        updatedAt: nowIso,
+      };
+      const nextList = prevList.map((item, i) => (i === idx ? next : item));
+      await supabase.from('swedpersiska_settings').upsert({
+        key: 'seller_deployments',
+        value: nextList,
+        updated_at: nowIso,
+      });
+
+      return res.status(200).json({
+        ok: true,
+        invoiceUrl,
+        isStripeLive,
+        seller_deployments: nextList,
+        subscription: next,
+      });
+    }
+
     if (action === 'delete_website_subscription') {
       const storeId = String(body.storeId || '').trim();
       const workerName = String(body.workerName || '').trim();

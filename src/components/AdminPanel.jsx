@@ -590,6 +590,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     status: 'active',
   });
   const [showCrmPasswords, setShowCrmPasswords] = useState({});
+  const [generatingInvoiceFor, setGeneratingInvoiceFor] = useState('');
+  const [emailDraftPreview, setEmailDraftPreview] = useState(null);
 
   const [adminTurnstileToken, setAdminTurnstileToken] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
@@ -1932,40 +1934,67 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   };
 
-  const handleMarkInvoiceSent = async (dep) => {
-    setSavingSub(true);
+  const handleGenerateAndCopyEmail = async (dep, templateType = 'invoice') => {
+    const keyId = dep?.storeId || dep?.workerName;
+    if (!keyId) return;
+    setGeneratingInvoiceFor(`${keyId}:${templateType}`);
     try {
-      const apiRes = await adminApi.request('update_website_subscription', {
+      const apiRes = await adminApi.request('generate_website_invoice_link', {
         storeId: dep.storeId || '',
         workerName: dep.workerName || '',
-        markInvoiceSent: true,
       });
       if (apiRes && apiRes.ok && Array.isArray(apiRes.seller_deployments)) {
         setSellerDeployments(apiRes.seller_deployments);
       }
-      triggerToast(`ارسال فاکتور ۲۶۰ کرون برای «${dep.name}» ثبت شد.`, 'success');
-    } catch (err) {
-      triggerToast('خطا در ثبت ارسال فاکتور: ' + err.message, 'error');
-    } finally {
-      setSavingSub(false);
-    }
-  };
+      const payLink = apiRes?.invoiceUrl || dep.stripeInvoiceLink || 'https://swedpersiska.vercel.app/?page=website-builder';
+      const expDate = dep.expiresAt ? new Date(dep.expiresAt).toLocaleDateString('fa-IR') : '-';
+      const expMs = dep.expiresAt ? new Date(dep.expiresAt).getTime() : Date.now();
+      const overdueDays = Math.max(1, Math.ceil((Date.now() - expMs) / (24 * 60 * 60 * 1000)));
 
-  const buildInvoiceMailto = (dep) => {
-    const expDate = dep.expiresAt ? new Date(dep.expiresAt).toLocaleDateString('fa-IR') : '';
-    const subject = encodeURIComponent(`فاکتور تمدید ماهانه وب‌سایت (۲۶۰ کرون) - ${dep.name}`);
-    const payLine = dep.stripeInvoiceLink
-      ? `لینک پرداخت امن Stripe (۲۶۰ کرون):\n${dep.stripeInvoiceLink}\n\n`
-      : '';
-    const body = encodeURIComponent(
-      `سلام ${dep.name} عزیز،\n\n` +
-      `اشتراک ماهانه وب‌سایت و پنل فروش شما تا تاریخ ${expDate} معتبر است.\n` +
-      `جهت تمدید اشتراک برای ۳۰ روز آینده (مبلغ ۲۶۰ کرون)، لطفاً از طریق لینک زیر پرداخت را انجام دهید:\n\n` +
-      payLine +
-      `کد ۸ رقمی مدیریت اشتراک شما: ${dep.manageCode || '-'}\n\n` +
-      `با تشکر، تیم پشتیبانی لینک شو`
-    );
-    return `mailto:${dep.email || ''}?subject=${subject}&body=${body}`;
+      const subject = templateType === 'overdue'
+        ? `هشدار عدم پرداخت فاکتور اشتراک وب‌سایت (۲۶۰ کرون) - ${dep.name}`
+        : `فاکتور تمدید ماهانه وب‌سایت (۲۶۰ کرون) - ${dep.name}`;
+
+      const body = templateType === 'overdue'
+        ? `سلام ${dep.name} عزیز،\n\n` +
+          `اشتراک ماهانه وب‌سایت و پنل فروش شما در تاریخ ${expDate} (${overdueDays} روز پیش) به پایان رسیده و تاکنون پرداخت انجام نشده است.\n` +
+          `برای جلوگیری از قطع موقت وب‌سایت و پنل فروش، لطفاً حداکثر ظرف ۴۸ ساعت آینده مبلغ ۲۶۰ کرون را از طریق لینک پرداخت امن Stripe زیر تسویه فرمایید:\n\n` +
+          `لینک پرداخت امن Stripe (۲۶۰ کرون):\n${payLink}\n\n` +
+          `کد ۸ رقمی مدیریت اشتراک شما: ${dep.manageCode || '-'}\n\n` +
+          `در صورت پرداخت، رسید به‌صورت خودکار ثبت می‌شود.\n` +
+          `با احترام، تیم پشتیبانی لینک شو`
+        : `سلام ${dep.name} عزیز،\n\n` +
+          `اشتراک ماهانه وب‌سایت و پنل فروش شما تا تاریخ ${expDate} معتبر است.\n` +
+          `جهت تمدید اشتراک برای ۳۰ روز آینده (مبلغ ۲۶۰ کرون)، لطفاً از طریق لینک پرداخت امن Stripe زیر اقدام فرمایید:\n\n` +
+          `لینک پرداخت امن Stripe (۲۶۰ کرون):\n${payLink}\n\n` +
+          `کد ۸ رقمی مدیریت اشتراک شما: ${dep.manageCode || '-'}\n\n` +
+          `با تشکر، تیم پشتیبانی لینک شو`;
+
+      const fullClipboardText = `موضوع: ${subject}\n\n${body}`;
+      try {
+        await navigator.clipboard.writeText(fullClipboardText);
+      } catch {}
+
+      setEmailDraftPreview({
+        keyId,
+        type: templateType,
+        email: dep.email || '',
+        subject,
+        body,
+        link: payLink,
+      });
+
+      triggerToast(
+        templateType === 'overdue'
+          ? 'لینک پرداخت ۲۶۰ کرون تولید و متن هشدار عدم پرداخت کپی شد!'
+          : 'لینک پرداخت ۲۶۰ کرون تولید و متن ایمیل فاکتور کپی شد!',
+        'success'
+      );
+    } catch (err) {
+      triggerToast('خطا در تولید لینک فاکتور: ' + err.message, 'error');
+    } finally {
+      setGeneratingInvoiceFor('');
+    }
   };
 
   const handleQuickSubStatus = async (dep, nextStatus) => {
@@ -4650,15 +4679,22 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                 فعال‌سازی
                               </button>
                             )}
-                            {dep.email && (
-                              <a
-                                href={buildInvoiceMailto(dep)}
-                                onClick={() => handleMarkInvoiceSent(dep)}
-                                className="h-8 px-3 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold inline-flex items-center gap-1"
-                              >
-                                <span>ارسال فاکتور ۲۶۰ کرون</span>
-                              </a>
-                            )}
+                            <button
+                              type="button"
+                              disabled={generatingInvoiceFor === `${keyId}:invoice`}
+                              onClick={() => handleGenerateAndCopyEmail(dep, 'invoice')}
+                              className="h-8 px-3 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                            >
+                              <span>{generatingInvoiceFor === `${keyId}:invoice` ? 'در حال ساخت لینک...' : 'ساخت لینک + کپی فاکتور ۲۶۰ کرون'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={generatingInvoiceFor === `${keyId}:overdue`}
+                              onClick={() => handleGenerateAndCopyEmail(dep, 'overdue')}
+                              className="h-8 px-3 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                            >
+                              <span>{generatingInvoiceFor === `${keyId}:overdue` ? 'در حال ساخت لینک...' : 'کپی هشدار عدم پرداخت'}</span>
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleOpenEditSub(dep)}
@@ -4685,6 +4721,58 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                             </button>
                           </div>
                         </div>
+
+                        {/* Ready-to-Copy Email & Auto Stripe Link Preview */}
+                        {emailDraftPreview?.keyId === keyId && (
+                          <div className="rounded-xl bg-white border border-[#0066CC]/30 p-3.5 space-y-2.5">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <span className="text-xs font-black text-[#1D1D1F]">
+                                {emailDraftPreview.type === 'overdue' ? 'متن آماده هشدار عدم پرداخت (کپی شد)' : 'متن آماده ایمیل فاکتور ۲۶۰ کرون (کپی شد)'}
+                              </span>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(`موضوع: ${emailDraftPreview.subject}\n\n${emailDraftPreview.body}`);
+                                    triggerToast('متن کامل ایمیل کپی شد.', 'success');
+                                  }}
+                                  className="h-7 px-2.5 rounded-lg bg-[#0066CC] text-white text-[11px] font-bold cursor-pointer"
+                                >
+                                  کپی مجدد متن
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard?.writeText(emailDraftPreview.link);
+                                    triggerToast('لینک پرداخت Stripe کپی شد.', 'success');
+                                  }}
+                                  className="h-7 px-2.5 rounded-lg bg-stone-100 text-stone-800 text-[11px] font-bold cursor-pointer"
+                                >
+                                  کپی فقط لینک
+                                </button>
+                                {emailDraftPreview.email && (
+                                  <a
+                                    href={`mailto:${emailDraftPreview.email}?subject=${encodeURIComponent(emailDraftPreview.subject)}&body=${encodeURIComponent(emailDraftPreview.body)}`}
+                                    className="h-7 px-2.5 rounded-lg bg-emerald-600 text-white text-[11px] font-bold inline-flex items-center"
+                                  >
+                                    باز کردن در ایمیل ↗
+                                  </a>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => setEmailDraftPreview(null)}
+                                  className="h-7 px-2 rounded-lg text-stone-500 hover:bg-stone-100 text-[11px] font-bold cursor-pointer"
+                                >
+                                  بستن
+                                </button>
+                              </div>
+                            </div>
+                            <div className="text-[11px] text-stone-700 bg-stone-50 rounded-lg p-2.5 border border-stone-200/70 whitespace-pre-line select-all">
+                              <strong className="block mb-1">موضوع: {emailDraftPreview.subject}</strong>
+                              {emailDraftPreview.body}
+                            </div>
+                          </div>
+                        )}
 
                         {/* Full Customer CRM Editor */}
                         {isEditing && (
