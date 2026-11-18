@@ -278,7 +278,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   });
   const [activeTab, setActiveTab] = useState(() => {
     try {
-      const validTabs = ['overview', 'ads', 'websites', 'categories', 'settings', 'reports'];
+      const validTabs = ['overview', 'ads', 'websites', 'categories', 'settings', 'reports', 'lifecycle'];
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
       if (tabParam === 'monetization' || tabParam === 'security') {
@@ -302,6 +302,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     if (tab === 'monetization' || tab === 'security') {
       targetTab = 'settings';
       setSettingsSubTab(tab);
+    }
+    if (targetTab === 'lifecycle') {
+      fetchLifecycleData(dupReviewFilter);
     }
     setActiveTab(targetTab);
     setMobileSidebarOpen(false);
@@ -400,6 +403,25 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [adStatusFilter, setAdStatusFilter] = useState('active');
   const [vipOnlyFilter, setVipOnlyFilter] = useState(false);
   const [adReports, setAdReports] = useState([]);
+  const [lifecycleSubTab, setLifecycleSubTab] = useState('duplicates'); // 'duplicates' | 'cleanup' | 'settings'
+  const [dupReviews, setDupReviews] = useState([]);
+  const [dupReviewFilter, setDupReviewFilter] = useState('pending');
+  const [lifecycleLoading, setLifecycleLoading] = useState(false);
+  const [cleanupRunning, setCleanupRunning] = useState(false);
+  const [lastCleanupResult, setLastCleanupResult] = useState(null);
+  const [cleanupOverview, setCleanupOverview] = useState({
+    runs: [],
+    logs: [],
+    summary: { warnedAds: 0, softDeletedAds: 0, protectedVipAds: 0 },
+  });
+  const [lifecycleSettings, setLifecycleSettings] = useState({
+    enabled: true,
+    inactivityDays: 30,
+    warningDays: 7,
+    softDeleteRetentionDays: 30,
+    freeBoostCooldownDays: 7,
+  });
+  const [hasServiceRoleConfig, setHasServiceRoleConfig] = useState(true);
   const [countryStats, setCountryStats] = useState({
     se: { total: 0, active: 0, vip: 0, views: 0 },
     no: { total: 0, active: 0, vip: 0, views: 0 },
@@ -674,7 +696,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         setAnalyticsSettings(prev => ({ ...prev, ...item.value }));
       }
       if (item.key === 'ad_reports' && Array.isArray(item.value)) {
-        setAdReports(item.value);
+        setAdReports(prev => (prev.length > item.value.length ? prev : item.value));
+      }
+      if (item.key === 'ad_lifecycle_settings' && item.value) {
+        setLifecycleSettings(prev => ({ ...prev, ...item.value }));
       }
       if (item.key === 'r2_settings' && item.value) {
         setR2Settings(prev => ({ ...prev, ...item.value }));
@@ -721,11 +746,15 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       // Try Secure Serverless Admin API first (single round-trip returns counts, settings, recent, and page 1)
       const apiRes = await adminApi.request('overview');
       if (apiRes && apiRes.ok) {
+        setHasServiceRoleConfig(apiRes.hasServiceRole !== false);
         setCounts(apiRes.counts);
         setCountryStats(apiRes.countryStats);
         setCategoryCounts(apiRes.categoryCounts);
         if (apiRes.monthBuckets) setMonthBuckets(apiRes.monthBuckets);
         setRecentActiveAds(apiRes.recentActiveAds || []);
+        if (Array.isArray(apiRes.openReports) && apiRes.openReports.length > 0) {
+          setAdReports(apiRes.openReports);
+        }
         applySettingsItems(apiRes.settings);
         if (isDefaultAdsView && Array.isArray(apiRes.initialActiveAds)) {
           setActiveAds(apiRes.initialActiveAds);
@@ -733,6 +762,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           setActivePage(1);
         } else {
           await fetchActiveAds(activePage || 1, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
+        }
+        if (activeTab === 'lifecycle') {
+          await fetchLifecycleData(dupReviewFilter);
         }
         return;
       }
@@ -743,6 +775,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           .from('swedpersiska_ads')
           .select('*')
           .eq('status', 'active')
+          .is('deleted_at', null)
           .order('is_featured', { ascending: false })
           .order('created_at', { ascending: false })
           .order('id', { ascending: false })
@@ -1419,6 +1452,106 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       triggerToast('گزارش بسته شد.');
     } catch (err) {
       triggerToast('خطا در بستن گزارش: ' + err.message, 'error');
+    }
+  };
+
+  const fetchLifecycleData = async (filterVal = dupReviewFilter) => {
+    setLifecycleLoading(true);
+    try {
+      const [dupRes, cleanRes] = await Promise.all([
+        adminApi.request('duplicate_reviews', { filter: filterVal }),
+        adminApi.request('cleanup_overview'),
+      ]);
+      if (dupRes?.ok) {
+        setDupReviews(Array.isArray(dupRes.reviews) ? dupRes.reviews : []);
+      }
+      if (cleanRes?.ok) {
+        if (cleanRes.settings) {
+          setLifecycleSettings(prev => ({ ...prev, ...cleanRes.settings }));
+        }
+        setCleanupOverview({
+          runs: Array.isArray(cleanRes.runs) ? cleanRes.runs : [],
+          logs: Array.isArray(cleanRes.logs) ? cleanRes.logs : [],
+          summary: cleanRes.summary || { warnedAds: 0, softDeletedAds: 0, protectedVipAds: 0 },
+        });
+      }
+    } catch (err) {
+      triggerToast('خطا در دریافت اطلاعات پاکسازی و ضدتکرار: ' + err.message, 'error');
+    } finally {
+      setLifecycleLoading(false);
+    }
+  };
+
+  const handleResolveDupReview = async (reviewId, decision) => {
+    playFeedback(decision === 'cleared_by_admin' ? 'vip' : 'delete');
+    try {
+      const res = await adminApi.request('resolve_duplicate_review', { reviewId, decision });
+      if (!res?.ok) {
+        throw new Error(res?.error || 'خطا در ثبت تصمیم بررسی تکرار');
+      }
+      setDupReviews(prev => prev.filter(r => r.id !== reviewId));
+      setCounts(prev => ({
+        ...prev,
+        pendingDuplicateReviews: Math.max(0, (prev.pendingDuplicateReviews || 1) - 1),
+        ...(decision === 'cleared_by_admin' ? { active: (prev.active || 0) + 1, pending: Math.max(0, (prev.pending || 1) - 1) } : {}),
+      }));
+      triggerToast(
+        decision === 'cleared_by_admin'
+          ? 'آگهی تایید و منتشر شد (مشکل تکرار رد شد).'
+          : 'آگهی به عنوان تکراری رد شد.'
+      );
+      if (onRefreshAds) onRefreshAds();
+    } catch (err) {
+      triggerToast(err.message, 'error');
+    }
+  };
+
+  const handleRunCleanupNow = async (dryRun = false) => {
+    if (!dryRun && !window.confirm('آیا از اجرای فوری پاکسازی چرخه عمر (ارسال هشدار، حذف موقت موارد سررسید و پاکسازی ذخیره‌سازی) اطمینان دارید؟')) {
+      return;
+    }
+    setCleanupRunning(true);
+    try {
+      const res = await adminApi.request('run_cleanup_now', { dryRun });
+      if (!res?.ok) {
+        throw new Error(res?.error || 'خطا در اجرای پاکسازی خودکار');
+      }
+      setLastCleanupResult(res.result);
+      triggerToast(
+        dryRun
+          ? 'شبیه‌سازی (Dry-Run) با موفقیت انجام شد — تغییری در دیتابیس ایجاد نشد.'
+          : 'پاکسازی چرخه عمر آگهی‌ها با موفقیت اجرا و ثبت شد.'
+      );
+      await fetchLifecycleData();
+      if (!dryRun && onRefreshAds) onRefreshAds();
+    } catch (err) {
+      triggerToast(err.message, 'error');
+    } finally {
+      setCleanupRunning(false);
+    }
+  };
+
+  const handleSaveLifecycleSettings = async (e) => {
+    e.preventDefault();
+    try {
+      const payload = {
+        enabled: Boolean(lifecycleSettings.enabled),
+        inactivityDays: Math.max(1, Math.min(365, Number(lifecycleSettings.inactivityDays) || 30)),
+        warningDays: Math.max(1, Math.min(60, Number(lifecycleSettings.warningDays) || 7)),
+        softDeleteRetentionDays: Math.max(1, Math.min(365, Number(lifecycleSettings.softDeleteRetentionDays) || 30)),
+        freeBoostCooldownDays: Math.max(1, Math.min(90, Number(lifecycleSettings.freeBoostCooldownDays) || 7)),
+        duplicateBlockThresholdSameOwner: 0.72,
+        duplicateBlockThresholdOtherOwner: 0.86,
+        duplicateReviewThresholdSameOwner: 0.55,
+      };
+      const apiRes = await adminApi.request('save_settings', { key: 'ad_lifecycle_settings', value: payload });
+      if (!apiRes?.ok) {
+        throw new Error(apiRes?.error || 'خطا در ذخیره تنظیمات چرخه عمر');
+      }
+      setLifecycleSettings(payload);
+      triggerToast('تنظیمات چرخه عمر و بوست رایگان ذخیره شد.');
+    } catch (err) {
+      triggerToast(err.message, 'error');
     }
   };
 
@@ -2425,6 +2558,14 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 onClick: () => handleTabChange('reports'),
               },
               {
+                id: 'lifecycle',
+                label: 'پاکسازی و ضدتکرار',
+                badge: counts.pendingDuplicateReviews || 0,
+                badgeAlert: (counts.pendingDuplicateReviews || 0) > 0,
+                active: activeTab === 'lifecycle',
+                onClick: () => handleTabChange('lifecycle'),
+              },
+              {
                 id: 'websites',
                 label: 'وب‌سایت‌ها و فروشگاه‌ها',
                 badge: sellerDeployments.length,
@@ -2575,6 +2716,14 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 onClick: () => handleTabChange('reports'),
               },
               {
+                id: 'lifecycle',
+                label: 'پاکسازی و ضدتکرار',
+                badge: counts.pendingDuplicateReviews || 0,
+                badgeAlert: (counts.pendingDuplicateReviews || 0) > 0,
+                active: activeTab === 'lifecycle',
+                onClick: () => handleTabChange('lifecycle'),
+              },
+              {
                 id: 'websites',
                 label: 'وب‌سایت‌ها و فروشگاه‌ها',
                 badge: sellerDeployments.length,
@@ -2661,6 +2810,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               {activeTab === 'overview' && 'داشبورد مدیریت'}
               {activeTab === 'ads' && (vipOnlyFilter ? 'آگهی‌های ویژه' : adStatusFilter === 'pending' ? 'در انتظار تایید' : 'مدیریت آگهی‌ها')}
               {activeTab === 'reports' && 'گزارش‌های تخلف'}
+              {activeTab === 'lifecycle' && 'مدیریت چرخه عمر، ضدتکرار و پاکسازی'}
               {activeTab === 'websites' && 'وب‌سایت‌ها و فروشگاه‌ها'}
               {activeTab === 'categories' && 'دسته‌بندی و شهرها'}
               {activeTab === 'settings' && 'تنظیمات سایت'}
@@ -2722,6 +2872,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               {activeTab === 'overview' && 'داشبورد مدیریت'}
               {activeTab === 'ads' && 'مدیریت آگهی‌ها'}
               {activeTab === 'reports' && 'گزارش‌های تخلف'}
+              {activeTab === 'lifecycle' && 'مدیریت چرخه عمر، ضدتکرار و پاکسازی'}
               {activeTab === 'websites' && 'وب‌سایت‌ها و فروشگاه‌ها'}
               {activeTab === 'categories' && 'دسته‌بندی و شهرها'}
               {activeTab === 'settings' && 'تنظیمات سایت'}
@@ -3519,16 +3670,31 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                   >
                                     {ad.title}
                                   </span>
-                                  <div className="flex items-center gap-2 mt-1 text-[11px] text-stone-400">
-                                    {catObj && (
-                                      <span className="px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 font-medium text-[10.5px]">
-                                        {catObj.fa}
+                                    <div className="flex items-center gap-2 mt-1 text-[11px] text-stone-400 flex-wrap">
+                                      {catObj && (
+                                        <span className="px-1.5 py-0.5 rounded bg-stone-100 text-stone-600 font-medium text-[10.5px]">
+                                          {catObj.fa}
+                                        </span>
+                                      )}
+                                      <span className="tabular-nums text-[10px]" dir="ltr">
+                                        {new Date(ad.created_at || '2026-01-01').toLocaleDateString('sv-SE')}
                                       </span>
-                                    )}
-                                    <span className="tabular-nums text-[10px]" dir="ltr">
-                                      {new Date(ad.created_at || '2026-01-01').toLocaleDateString('sv-SE')}
-                                    </span>
-                                  </div>
+                                      {ad.last_boosted_at && (
+                                        <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-semibold text-[10px]">
+                                          بوست‌شده
+                                        </span>
+                                      )}
+                                      {ad.duplicate_detection_status && ad.duplicate_detection_status !== 'clean' && ad.duplicate_detection_status !== 'cleared_by_admin' && (
+                                        <span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 font-semibold text-[10px]">
+                                          {ad.duplicate_detection_status === 'confirmed_duplicate' ? 'تکراری' : 'مشکوک به تکرار'}
+                                        </span>
+                                      )}
+                                      {ad.cleanup_warning_sent_at && !ad.deleted_at && (
+                                        <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 font-semibold text-[10px]">
+                                          در صف حذف
+                                        </span>
+                                      )}
+                                    </div>
                                 </div>
                               </td>
 
@@ -3727,6 +3893,373 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     </div>
                   ))}
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* ========================================================
+              TAB: LIFECYCLE, ANTI-DUPLICATE & SCHEDULED CLEANUP
+          ======================================================== */}
+          {activeTab === 'lifecycle' && (
+            <div className="space-y-4 w-full max-w-5xl mx-auto">
+              {!hasServiceRoleConfig && (
+                <div className="p-4 rounded-2xl border border-amber-300 bg-amber-50 text-xs text-amber-950 font-semibold flex items-start gap-2.5">
+                  <AlertCircle size={18} className="text-amber-700 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-black block">متغیر امنیتی SUPABASE_SERVICE_ROLE_KEY روی سرور ادمین تنظیم نشده است</span>
+                    <span className="text-[11px] text-amber-900">برای مشاهده صف بررسی تکرار، اجرای پاکسازی دستی و ذخیره تنظیمات، مقدار SUPABASE_SERVICE_ROLE_KEY را در تنظیمات محیطی Vercel اضافه کنید.</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Sub-Navigation Pills */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="p-1.5 rounded-2xl border border-stone-200/80 bg-white flex flex-wrap items-center gap-1.5">
+                  {[
+                    { id: 'duplicates', label: `بررسی آگهی‌های تکراری (${dupReviews.length})` },
+                    { id: 'cleanup', label: 'پاکسازی خودکار ماهانه و گزارش‌ها' },
+                    { id: 'settings', label: 'تنظیمات آستانه و بوست' },
+                  ].map((tabItem) => (
+                    <button
+                      key={tabItem.id}
+                      type="button"
+                      onClick={() => {
+                        playFeedback('click');
+                        setLifecycleSubTab(tabItem.id);
+                      }}
+                      className={`min-h-[36px] px-3.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        lifecycleSubTab === tabItem.id
+                          ? 'bg-slate-900 text-white shadow-sm'
+                          : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100'
+                      }`}
+                    >
+                      {tabItem.label}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={lifecycleLoading}
+                  onClick={() => fetchLifecycleData(dupReviewFilter)}
+                  className="h-9 px-3.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-50 text-xs font-bold text-stone-700 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw size={13} className={lifecycleLoading ? 'animate-spin text-blue-600' : ''} />
+                  <span>بروزرسانی</span>
+                </button>
+              </div>
+
+              {/* SUBTAB 1: DUPLICATE FALSE-POSITIVE REVIEW QUEUE */}
+              {lifecycleSubTab === 'duplicates' && (
+                <div className="space-y-3">
+                  <div className="p-4 rounded-2xl border border-stone-200/80 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-extrabold text-stone-900">صف بررسی آگهی‌های مشکوک به تکرار</h3>
+                      <p className="text-xs text-stone-500">آگهی‌هایی که سیستم ضدتکرار علامت‌گذاری کرده یا کاربر درخواست بررسی خطای مثبت داده است</p>
+                    </div>
+                    <select
+                      value={dupReviewFilter}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDupReviewFilter(val);
+                        fetchLifecycleData(val);
+                      }}
+                      className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-bold text-stone-800"
+                    >
+                      <option value="pending">در انتظار بررسی</option>
+                      <option value="cleared_by_admin">تاییدشده (غیرتکراری)</option>
+                      <option value="confirmed_duplicate">ردشده (تکراری)</option>
+                      <option value="all">همه موارد</option>
+                    </select>
+                  </div>
+
+                  {dupReviews.length === 0 ? (
+                    <div className="p-10 rounded-2xl border border-stone-200/80 bg-white text-center space-y-2">
+                      <CheckCircle size={30} className="mx-auto text-emerald-500" />
+                      <p className="text-sm font-bold text-stone-800">هیچ موردی در این وضعیت وجود ندارد</p>
+                      <p className="text-xs text-stone-500">تمامی درخواست‌های مشکوک به تکرار بررسی شده‌اند.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {dupReviews.map((rev) => (
+                        <div key={rev.id} className="p-4 rounded-2xl border border-stone-200/80 bg-white space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[11px] font-extrabold tabular-nums">
+                                شباهت {Math.round(Number(rev.similarity_score || 0) * 100)}%
+                              </span>
+                              {rev.same_owner && (
+                                <span className="px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold">
+                                  تعلق به یک آگهی‌دهنده
+                                </span>
+                              )}
+                              <span className="text-[11px] text-stone-400 font-mono">
+                                {rev.created_at ? new Date(rev.created_at).toLocaleDateString('sv-SE') : ''}
+                              </span>
+                            </div>
+                            <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                              rev.resolution === 'pending'
+                                ? 'bg-blue-50 text-blue-700'
+                                : rev.resolution === 'cleared_by_admin'
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : 'bg-rose-50 text-rose-700'
+                            }`}>
+                              {rev.resolution === 'pending' ? 'در انتظار بررسی' : rev.resolution === 'cleared_by_admin' ? 'تایید و منتشرشد' : 'رد به‌عنوان تکراری'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                            <div className="p-3 rounded-xl bg-stone-50 border border-stone-200/70 space-y-1">
+                              <span className="text-[10.5px] font-bold text-stone-500 block">آگهی جدید ثبت‌شده:</span>
+                              <p className="font-extrabold text-stone-900">{rev.ad?.title_fa || rev.ad?.title || 'حذف‌شده'}</p>
+                              <div className="text-[11px] text-stone-500 flex gap-2">
+                                <span className="font-mono">{rev.ad?.reference_number}</span>
+                                <span>•</span>
+                                <span>{rev.ad?.city}</span>
+                              </div>
+                              <p className="text-[11px] text-stone-600 line-clamp-2">{rev.ad?.description}</p>
+                            </div>
+
+                            <div className="p-3 rounded-xl bg-blue-50/40 border border-blue-200/70 space-y-1">
+                              <span className="text-[10.5px] font-bold text-blue-700 block">آگهی مشابه قبلی:</span>
+                              <p className="font-extrabold text-stone-900">{rev.matched_ad?.title_fa || rev.matched_ad?.title || 'حذف‌شده'}</p>
+                              <div className="text-[11px] text-stone-500 flex gap-2">
+                                <span className="font-mono">{rev.matched_ad?.reference_number || '-'}</span>
+                                <span>•</span>
+                                <span>{rev.matched_ad?.city || '-'}</span>
+                              </div>
+                              <p className="text-[11px] text-stone-600 line-clamp-2">{rev.matched_ad?.description || ''}</p>
+                            </div>
+                          </div>
+
+                          {Array.isArray(rev.reasons) && rev.reasons.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {rev.reasons.map((reason, i) => (
+                                <span key={i} className="px-2 py-0.5 rounded-lg bg-stone-100 text-stone-700 text-[10.5px] font-medium">
+                                  {reason}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {rev.resolution === 'pending' && (
+                            <div className="flex flex-wrap gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => handleResolveDupReview(rev.id, 'cleared_by_admin')}
+                                className="h-9 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <CheckCircle size={14} />
+                                <span>تایید و انتشار (آگهی تکراری نیست)</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleResolveDupReview(rev.id, 'confirmed_duplicate')}
+                                className="h-9 px-3.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                              >
+                                <X size={14} />
+                                <span>رد آگهی (تایید تکرار)</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* SUBTAB 2: SCHEDULED CLEANUP & LOGS */}
+              {lifecycleSubTab === 'cleanup' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="p-4 rounded-2xl bg-white border border-stone-200/80">
+                      <span className="text-xs font-bold text-stone-500 block">آگهی‌های دارای هشدار ۷ روزه</span>
+                      <span className="text-2xl font-black text-amber-600 tabular-nums">{cleanupOverview.summary.warnedAds}</span>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-white border border-stone-200/80">
+                      <span className="text-xs font-bold text-stone-500 block">بایگانی حذف موقت</span>
+                      <span className="text-2xl font-black text-rose-600 tabular-nums">{cleanupOverview.summary.softDeletedAds}</span>
+                    </div>
+                    <div className="p-4 rounded-2xl bg-white border border-stone-200/80">
+                      <span className="text-xs font-bold text-stone-500 block">آگهی‌های VIP محافظت‌شده</span>
+                      <span className="text-2xl font-black text-emerald-600 tabular-nums">{cleanupOverview.summary.protectedVipAds}</span>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-white border border-stone-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-extrabold text-stone-900">اجرای خودکار ماهانه (یک‌بار در ماه)</h3>
+                      <p className="text-xs text-stone-500">زمان‌بندی خودکار در Supabase pg_cron (روز اول و هشتم هر ماه میلادی) و Vercel Cron فعال است.</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={cleanupRunning}
+                        onClick={() => handleRunCleanupNow(true)}
+                        className="h-9 px-3.5 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-800 text-xs font-bold cursor-pointer disabled:opacity-50"
+                      >
+                        شبیه‌سازی (Dry-Run)
+                      </button>
+                      <button
+                        type="button"
+                        disabled={cleanupRunning}
+                        onClick={() => handleRunCleanupNow(false)}
+                        className="h-9 px-3.5 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold cursor-pointer disabled:opacity-50"
+                      >
+                        {cleanupRunning ? 'در حال اجرا...' : 'اجرای پاکسازی اکنون'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {lastCleanupResult && (
+                    <div className="p-4 rounded-2xl bg-blue-50/70 border border-blue-200 text-xs text-blue-950 space-y-1">
+                      <div className="font-black">نتیجه آخرین اجرا ({lastCleanupResult.dry_run ? 'شبیه‌سازی' : 'اجرای واقعی'}):</div>
+                      <div className="flex flex-wrap gap-3 tabular-nums">
+                        <span>انقضای VIP: <strong>{lastCleanupResult.expired_promotions_count || 0}</strong></span>
+                        <span>هشدار ارسال‌شده: <strong>{lastCleanupResult.warned_count || 0}</strong></span>
+                        <span>حذف موقت: <strong>{lastCleanupResult.soft_deleted_count || 0}</strong></span>
+                        <span>حذف دائمی: <strong>{lastCleanupResult.permanently_deleted_count || 0}</strong></span>
+                        <span>محافظت‌شده (رد شد): <strong>{lastCleanupResult.skipped_protected_count || 0}</strong></span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recent Runs */}
+                  <div className="p-4 rounded-2xl bg-white border border-stone-200/80 space-y-2.5">
+                    <h4 className="text-xs font-extrabold text-stone-800">تاریخچه اجراهای پاکسازی</h4>
+                    {cleanupOverview.runs.length === 0 ? (
+                      <p className="text-xs text-stone-400">هنوز اجرایی ثبت نشده است.</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-right text-xs">
+                          <thead>
+                            <tr className="border-b border-stone-200 text-[11px] text-stone-500">
+                              <th className="py-2 px-2">تاریخ</th>
+                              <th className="py-2 px-2">منبع</th>
+                              <th className="py-2 px-2">نوع</th>
+                              <th className="py-2 px-2">انقضای VIP</th>
+                              <th className="py-2 px-2">هشدار</th>
+                              <th className="py-2 px-2">حذف موقت</th>
+                              <th className="py-2 px-2">حذف دائمی</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-stone-100 tabular-nums">
+                            {cleanupOverview.runs.map((run) => (
+                              <tr key={run.id}>
+                                <td className="py-2 px-2 font-mono text-[11px]" dir="ltr">{new Date(run.started_at).toLocaleString('sv-SE')}</td>
+                                <td className="py-2 px-2 font-semibold">{run.trigger_source}</td>
+                                <td className="py-2 px-2">{run.dry_run ? 'شبیه‌سازی' : 'واقعی'}</td>
+                                <td className="py-2 px-2">{run.expired_promotions_count}</td>
+                                <td className="py-2 px-2">{run.warned_count}</td>
+                                <td className="py-2 px-2">{run.soft_deleted_count}</td>
+                                <td className="py-2 px-2">{run.permanently_deleted_count}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Audit Logs */}
+                  <div className="p-4 rounded-2xl bg-white border border-stone-200/80 space-y-2.5">
+                    <h4 className="text-xs font-extrabold text-stone-800">گزارش تفصیلی عملیات روی آگهی‌ها</h4>
+                    {cleanupOverview.logs.length === 0 ? (
+                      <p className="text-xs text-stone-400">هنوز رکورد عملیاتی ثبت نشده است.</p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-72 overflow-y-auto">
+                        {cleanupOverview.logs.map((log) => (
+                          <div key={log.id} className="p-2.5 rounded-xl bg-stone-50 border border-stone-200/70 text-[11px] flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="px-2 py-0.5 rounded-md bg-white border border-stone-200 font-bold text-stone-800">{log.action}</span>
+                              {log.ad_reference_number && <span className="font-mono text-stone-600">{log.ad_reference_number}</span>}
+                              <span className="font-semibold text-stone-800">{log.ad_title || ''}</span>
+                              {log.reason && <span className="text-stone-500">— {log.reason}</span>}
+                            </div>
+                            <span className="font-mono text-[10px] text-stone-400" dir="ltr">{new Date(log.created_at).toLocaleString('sv-SE')}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* SUBTAB 3: CONFIGURABLE THRESHOLDS */}
+              {lifecycleSubTab === 'settings' && (
+                <form onSubmit={handleSaveLifecycleSettings} className="p-5 rounded-2xl bg-white border border-stone-200/80 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-extrabold text-stone-900">تنظیمات چرخه عمر، پاکسازی و بوست</h3>
+                      <p className="text-xs text-stone-500">پیکربندی آستانه عدم فعالیت (پیش‌فرض ۳۰ روز)، مهلت هشدار (۷ روز) و فاصله بوست رایگان (۷ روز)</p>
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-xs font-bold text-stone-800 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={lifecycleSettings.enabled}
+                        onChange={(e) => setLifecycleSettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                        className="h-4 w-4 rounded text-blue-600"
+                      />
+                      <span>پاکسازی خودکار فعال</span>
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1">آستانه عدم فعالیت (روز)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={lifecycleSettings.inactivityDays}
+                        onChange={(e) => setLifecycleSettings(prev => ({ ...prev, inactivityDays: e.target.value }))}
+                        className="w-full rounded-xl border border-stone-300 px-3 py-2 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1">مهلت هشدار قبل از حذف (روز)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={60}
+                        value={lifecycleSettings.warningDays}
+                        onChange={(e) => setLifecycleSettings(prev => ({ ...prev, warningDays: e.target.value }))}
+                        className="w-full rounded-xl border border-stone-300 px-3 py-2 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1">نگهداری پس از حذف موقت (روز)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={lifecycleSettings.softDeleteRetentionDays}
+                        onChange={(e) => setLifecycleSettings(prev => ({ ...prev, softDeleteRetentionDays: e.target.value }))}
+                        className="w-full rounded-xl border border-stone-300 px-3 py-2 text-xs font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1">فاصله بوست رایگان (روز)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={90}
+                        value={lifecycleSettings.freeBoostCooldownDays}
+                        onChange={(e) => setLifecycleSettings(prev => ({ ...prev, freeBoostCooldownDays: e.target.value }))}
+                        className="w-full rounded-xl border border-stone-300 px-3 py-2 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold inline-flex items-center gap-2 cursor-pointer"
+                  >
+                    <Save size={14} />
+                    <span>ذخیره تنظیمات</span>
+                  </button>
+                </form>
               )}
             </div>
           )}
@@ -6436,14 +6969,20 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     <Copy size={12} className="text-stone-400" />
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => copyText(selectedAdForModal.pin_code || '1234', `modal-pin`, 'رمز ویرایش')}
-                    className="text-xs font-extrabold text-amber-900 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded-lg border border-amber-200 flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <span>رمز ویرایش: <span className="font-mono">{selectedAdForModal.pin_code || '1234'}</span></span>
-                    <Copy size={12} className="text-amber-600" />
-                  </button>
+                  {selectedAdForModal.pin_code && selectedAdForModal.pin_code !== 'PROTECTED' ? (
+                    <button
+                      type="button"
+                      onClick={() => copyText(selectedAdForModal.pin_code, `modal-pin`, 'رمز ویرایش')}
+                      className="text-xs font-extrabold text-amber-900 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded-lg border border-amber-200 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span>رمز ویرایش: <span className="font-mono">{selectedAdForModal.pin_code}</span></span>
+                      <Copy size={12} className="text-amber-600" />
+                    </button>
+                  ) : (
+                    <span className="text-xs font-bold text-stone-600 bg-stone-100 px-2.5 py-1 rounded-lg border border-stone-200">
+                      پین: محافظت‌شده
+                    </span>
+                  )}
 
                   <span className="flex items-center gap-1 tabular-nums text-stone-600 font-semibold">
                     <Eye size={13} className="text-stone-400" />
@@ -6453,6 +6992,16 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   <span className="text-stone-500 tabular-nums text-xs">
                     تاریخ ثبت: <span dir="ltr" className="inline-block font-mono">{new Date(selectedAdForModal.created_at || '2026-01-01').toLocaleDateString('sv-SE')}</span>
                   </span>
+                  {selectedAdForModal.last_boosted_at && (
+                    <span className="text-blue-700 font-semibold tabular-nums text-xs">
+                      آخرین بوست: <span dir="ltr" className="inline-block font-mono">{new Date(selectedAdForModal.last_boosted_at).toLocaleDateString('sv-SE')}</span>
+                    </span>
+                  )}
+                  {selectedAdForModal.promotion_expires_at && (
+                    <span className="text-amber-700 font-semibold tabular-nums text-xs">
+                      انقضای VIP: <span dir="ltr" className="inline-block font-mono">{new Date(selectedAdForModal.promotion_expires_at).toLocaleDateString('sv-SE')}</span>
+                    </span>
+                  )}
                 </div>
               </div>
 

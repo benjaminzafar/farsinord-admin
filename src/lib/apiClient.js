@@ -106,6 +106,7 @@ export const adminApi = {
       if (contentType.includes('application/json')) {
         const json = await res.json();
         if (json && json.ok) return json;
+        if (json && json.error) return { ok: false, status: res.status, error: json.error };
       }
     } catch {}
     return null;

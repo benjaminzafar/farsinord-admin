@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://bezbnymjcnmazdonfzky.supabase.co';
+const HAS_SERVICE_ROLE = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJlemJueW1qY25tYXpkb25memt5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ2OTM1NjksImV4cCI6MjExMDI2OTU2OX0.ylsHBAZ1zo1z_aKpHx7hgl-yZu2yt2puFNhR8jBm6S4';
 
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -11,7 +12,7 @@ const FALLBACK_SECRET_SEED = `${supabaseKey}:${process.env.ADMIN_PASSWORD || pro
 const DETERMINISTIC_FALLBACK_SECRET = crypto.createHash('sha256').update(FALLBACK_SECRET_SEED, 'utf8').digest('hex');
 const TOKEN_SECRET = process.env.ADMIN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || DETERMINISTIC_FALLBACK_SECRET;
 
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://farsinord-admin.vercel.app,https://swedpersiska.vercel.app,https://farsinord.vercel.app,https://farsinord-frontend.vercel.app')
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://www.linksho.eu,https://linksho.eu,https://admin.linksho.eu,https://farsinord-admin.vercel.app,https://swedpersiska.vercel.app,https://farsinord.vercel.app,https://farsinord-frontend.vercel.app')
   .split(',')
   .map((o) => o.trim())
   .filter(Boolean);
@@ -66,6 +67,105 @@ function createR2PresignedPutUrl({ accountId, accessKeyId, secretAccessKey, buck
   const signature = crypto.createHmac('sha256', kSigning).update(stringToSign, 'utf8').digest('hex');
 
   return `https://${host}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`;
+}
+
+async function resolveAdminR2Config() {
+  if (
+    process.env.R2_ACCOUNT_ID &&
+    process.env.R2_ACCESS_KEY_ID &&
+    process.env.R2_SECRET_ACCESS_KEY &&
+    process.env.R2_BUCKET_NAME &&
+    process.env.R2_PUBLIC_URL
+  ) {
+    return {
+      enabled: true,
+      accountId: process.env.R2_ACCOUNT_ID.trim(),
+      accessKeyId: process.env.R2_ACCESS_KEY_ID.trim(),
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY.trim(),
+      bucketName: process.env.R2_BUCKET_NAME.trim(),
+      publicUrl: process.env.R2_PUBLIC_URL.trim().replace(/\/+$/, ''),
+    };
+  }
+  const { data } = await supabase.from('swedpersiska_settings').select('value').eq('key', 'r2_settings').maybeSingle();
+  const v = data?.value;
+  if (!v?.enabled || !v.accountId || !v.accessKeyId || !v.secretAccessKey || !v.bucketName || !v.publicUrl) return null;
+  return { ...v, publicUrl: String(v.publicUrl).trim().replace(/\/+$/, '') };
+}
+
+async function deleteR2ObjectsForAdAdmin(imageUrls = [], excludeAdId = null) {
+  const urls = Array.isArray(imageUrls) ? imageUrls.filter(Boolean) : [];
+  if (urls.length === 0) return { deletedKeys: [], failedKeys: [] };
+  const r2 = await resolveAdminR2Config();
+  if (!r2) return { deletedKeys: [], failedKeys: [] };
+
+  const deletedKeys = [];
+  const failedKeys = [];
+  const base = r2.publicUrl;
+
+  for (const url of urls) {
+    if (!String(url).startsWith(`${base}/`)) continue;
+    const objectKey = decodeURIComponent(String(url).slice(base.length + 1).split('?')[0]);
+    if (!objectKey || objectKey.includes('..')) continue;
+
+    if (excludeAdId) {
+      try {
+        const { count } = await supabase
+          .from('swedpersiska_ads')
+          .select('id', { count: 'exact', head: true })
+          .neq('id', excludeAdId)
+          .contains('images', [url]);
+        if ((count || 0) > 0) continue;
+      } catch {}
+    }
+
+    try {
+      const host = `${r2.accountId}.r2.cloudflarestorage.com`;
+      const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+      const dateStamp = amzDate.slice(0, 8);
+      const scope = `${dateStamp}/auto/s3/aws4_request`;
+      const uri = `/${r2.bucketName}/${objectKey.split('/').map(encodeRfc3986).join('/')}`;
+      const emptyHash = crypto.createHash('sha256').update('').digest('hex');
+      const headersStr = `host:${host}\nx-amz-content-sha256:${emptyHash}\nx-amz-date:${amzDate}\n`;
+      const signed = 'host;x-amz-content-sha256;x-amz-date';
+      const canonicalReq = ['DELETE', uri, '', headersStr, signed, emptyHash].join('\n');
+      const strToSign = ['AWS4-HMAC-SHA256', amzDate, scope, crypto.createHash('sha256').update(canonicalReq).digest('hex')].join('\n');
+      const hmac = (k, d) => crypto.createHmac('sha256', k).update(d, 'utf8').digest();
+      const kSigning = hmac(hmac(hmac(hmac(`AWS4${r2.secretAccessKey}`, dateStamp), 'auto'), 's3'), 'aws4_request');
+      const sig = crypto.createHmac('sha256', kSigning).update(strToSign, 'utf8').digest('hex');
+      const resp = await fetch(`https://${host}${uri}`, {
+        method: 'DELETE',
+        headers: {
+          'x-amz-date': amzDate,
+          'x-amz-content-sha256': emptyHash,
+          Authorization: `AWS4-HMAC-SHA256 Credential=${r2.accessKeyId}/${scope}, SignedHeaders=${signed}, Signature=${sig}`,
+        },
+      });
+      if (resp.ok || resp.status === 204 || resp.status === 404) deletedKeys.push(objectKey);
+      else failedKeys.push(objectKey);
+    } catch {
+      failedKeys.push(objectKey);
+    }
+  }
+  return { deletedKeys, failedKeys };
+}
+
+async function attachAdminPins(ads = []) {
+  if (!HAS_SERVICE_ROLE || !Array.isArray(ads) || ads.length === 0) return ads;
+  const ids = ads.map((a) => a.id).filter(Boolean);
+  if (ids.length === 0) return ads;
+  try {
+    const { data: creds } = await supabase
+      .from('ad_credentials')
+      .select('ad_id, pin_code')
+      .in('ad_id', ids);
+    const pinMap = new Map((creds || []).map((c) => [c.ad_id, c.pin_code]));
+    return ads.map((a) => ({
+      ...a,
+      pin_code: pinMap.get(a.id) || (a.pin_code && a.pin_code !== 'PROTECTED' ? a.pin_code : ''),
+    }));
+  } catch {
+    return ads;
+  }
 }
 
 function safeEqual(a, b) {
@@ -156,17 +256,25 @@ export default async function handler(req, res) {
 
     // 3. Protected Admin Actions
     if (action === 'overview') {
-      const [firstPageRes, metaRes, settingsRes] = await Promise.all([
+      const [firstPageRes, metaRes, settingsRes, dupCountRes, openReportsRes] = await Promise.all([
         supabase
           .from('swedpersiska_ads')
           .select('*')
           .eq('status', 'active')
+          .is('deleted_at', null)
           .order('is_featured', { ascending: false })
+          .order('sort_timestamp', { ascending: false })
           .order('created_at', { ascending: false })
           .order('id', { ascending: false })
           .range(0, PAGE_SIZE - 1),
-        supabase.from('swedpersiska_ads').select('category, country, status, is_featured, views_count, created_at'),
-        supabase.from('swedpersiska_settings').select('*')
+        supabase.from('swedpersiska_ads').select('category, country, status, is_featured, promotion_expires_at, cleanup_warning_sent_at, deleted_at, views_count, created_at'),
+        supabase.from('swedpersiska_settings').select('*'),
+        HAS_SERVICE_ROLE
+          ? supabase.from('ad_duplicate_reviews').select('id', { count: 'exact', head: true }).eq('resolution', 'pending')
+          : Promise.resolve({ count: 0 }),
+        HAS_SERVICE_ROLE
+          ? supabase.from('ad_reports').select('*').eq('status', 'open').order('created_at', { ascending: false }).limit(100)
+          : Promise.resolve({ data: [] }),
       ]);
 
       const countryStats = {
@@ -185,9 +293,16 @@ export default async function handler(req, res) {
       let activeCount = 0;
       let pendingCount = 0;
       let vipCount = 0;
+      let softDeletedCount = 0;
+      let warnedCount = 0;
       let totalViews = 0;
+      const nowMs = Date.now();
 
       (metaRes.data || []).forEach((row) => {
+        if (row.deleted_at || row.status === 'deleted') {
+          softDeletedCount++;
+          return;
+        }
         totalCount++;
         const c = row.country || 'se';
         if (!countryStats[c]) countryStats[c] = { total: 0, active: 0, vip: 0, views: 0 };
@@ -198,7 +313,11 @@ export default async function handler(req, res) {
         } else if (row.status === 'pending') {
           pendingCount++;
         }
-        if (row.is_featured) {
+        if (row.cleanup_warning_sent_at) {
+          warnedCount++;
+        }
+        const isVipActive = Boolean(row.is_featured && (!row.promotion_expires_at || Date.parse(row.promotion_expires_at) > nowMs));
+        if (isVipActive) {
           vipCount++;
           countryStats[c].vip++;
         }
@@ -212,22 +331,27 @@ export default async function handler(req, res) {
           if (/^\d{4}-\d{2}$/.test(ym)) {
             if (!monthBuckets[ym]) monthBuckets[ym] = { total: 0, vip: 0 };
             monthBuckets[ym].total++;
-            if (row.is_featured) monthBuckets[ym].vip++;
+            if (isVipActive) monthBuckets[ym].vip++;
           }
         }
       });
 
-      const firstPageAds = firstPageRes.data || [];
+      const firstPageAds = await attachAdminPins(firstPageRes.data || []);
 
       return res.status(200).json({
         ok: true,
+        hasServiceRole: HAS_SERVICE_ROLE,
         counts: {
           total: totalCount,
           active: activeCount,
           pending: pendingCount,
           vip: vipCount,
+          softDeleted: softDeletedCount,
+          warnedAds: warnedCount,
+          pendingDuplicateReviews: dupCountRes.count || 0,
           totalViews
         },
+        openReports: openReportsRes.data || [],
         countryStats,
         categoryCounts,
         monthBuckets,
@@ -278,7 +402,12 @@ export default async function handler(req, res) {
         .from('swedpersiska_ads')
         .select('*', { count: 'exact' });
 
-      if (status && status !== 'all') q = q.eq('status', status);
+      if (status === 'deleted') {
+        q = q.not('deleted_at', 'is', null);
+      } else {
+        q = q.is('deleted_at', null);
+        if (status && status !== 'all') q = q.eq('status', status);
+      }
       if (vipOnly) q = q.eq('is_featured', true);
 
       if (country && country !== 'all') q = q.eq('country', country);
@@ -293,20 +422,66 @@ export default async function handler(req, res) {
 
       q = q
         .order('is_featured', { ascending: false })
+        .order('sort_timestamp', { ascending: false })
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
         .range(from, to);
 
       const { data, count, error } = await q;
       if (error) throw error;
-      return res.status(200).json({ ok: true, ads: data || [], count: count ?? 0, page });
+      const enriched = await attachAdminPins(data || []);
+      return res.status(200).json({ ok: true, ads: enriched, count: count ?? 0, page });
+    }
+
+    if (!HAS_SERVICE_ROLE && ['toggle_featured', 'update_status', 'update_country', 'delete_ad', 'dismiss_report', 'save_settings', 'resolve_duplicate_review', 'run_cleanup_now'].includes(action)) {
+      return res.status(503).json({
+        ok: false,
+        error: 'متغیر امنیتی SUPABASE_SERVICE_ROLE_KEY روی سرور ادمین (Vercel) تنظیم نشده است.',
+      });
     }
 
     if (action === 'toggle_featured') {
       const { id, is_featured } = body;
-      const { error } = await supabase.from('swedpersiska_ads').update({ is_featured: !!is_featured }).eq('id', id);
+      const enableVip = Boolean(is_featured);
+      const { data: stripeRow } = await supabase.from('swedpersiska_settings').select('value').eq('key', 'stripe_settings').maybeSingle();
+      const durationDays = Math.max(1, Math.min(365, Number(stripeRow?.value?.vipDurationDays) || 30));
+      const nowIso = new Date().toISOString();
+      const expiresAt = enableVip ? new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString() : null;
+
+      const { data: adRow } = await supabase.from('swedpersiska_ads').select('country, last_meaningful_activity_at').eq('id', id).maybeSingle();
+      const { error } = await supabase
+        .from('swedpersiska_ads')
+        .update({
+          is_featured: enableVip,
+          promotion_expires_at: expiresAt,
+          ...(enableVip ? { last_meaningful_activity_at: nowIso, cleanup_warning_sent_at: null, scheduled_deletion_at: null } : {}),
+          updated_at: nowIso,
+        })
+        .eq('id', id);
       if (error) throw error;
-      return res.status(200).json({ ok: true });
+
+      if (enableVip) {
+        await supabase.from('ad_payments').insert({
+          ad_id: id,
+          provider: 'admin_grant',
+          provider_session_id: `admin_vip_${crypto.randomUUID()}`,
+          status: 'paid',
+          amount: 0,
+          currency: 'SEK',
+          target_country: adRow?.country || 'se',
+          duration_days: durationDays,
+          starts_at: nowIso,
+          expires_at: expiresAt,
+        });
+      } else {
+        await supabase
+          .from('ad_payments')
+          .update({ status: 'expired', updated_at: nowIso })
+          .eq('ad_id', id)
+          .eq('status', 'paid');
+      }
+
+      return res.status(200).json({ ok: true, promotion_expires_at: expiresAt });
     }
 
     if (action === 'update_status') {
@@ -314,11 +489,28 @@ export default async function handler(req, res) {
       if (!['active', 'pending', 'rejected'].includes(status)) {
         return res.status(400).json({ ok: false, error: 'Invalid status value' });
       }
-      const { error } = await supabase
-        .from('swedpersiska_ads')
-        .update({ status, updated_at: new Date().toISOString() })
-        .eq('id', id);
+      const nowIso = new Date().toISOString();
+      const updatePayload = { status, updated_at: nowIso };
+      if (status === 'active') {
+        updatePayload.deleted_at = null;
+        updatePayload.last_meaningful_activity_at = nowIso;
+        updatePayload.sort_timestamp = nowIso;
+        updatePayload.cleanup_warning_sent_at = null;
+        updatePayload.scheduled_deletion_at = null;
+      }
+      const { error } = await supabase.from('swedpersiska_ads').update(updatePayload).eq('id', id);
       if (error) throw error;
+
+      if (status === 'active' || status === 'rejected') {
+        await supabase
+          .from('ad_duplicate_reviews')
+          .update({
+            resolution: status === 'active' ? 'cleared_by_admin' : 'confirmed_duplicate',
+            resolved_at: nowIso,
+          })
+          .eq('ad_id', id)
+          .eq('resolution', 'pending');
+      }
       return res.status(200).json({ ok: true });
     }
 
@@ -331,8 +523,29 @@ export default async function handler(req, res) {
 
     if (action === 'delete_ad') {
       const { id } = body;
+      const { data: targetAd } = await supabase
+        .from('swedpersiska_ads')
+        .select('id, reference_number, title, title_fa, images')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (targetAd?.images?.length) {
+        await deleteR2ObjectsForAdAdmin(targetAd.images, targetAd.id);
+      }
+
       const { error } = await supabase.from('swedpersiska_ads').delete().eq('id', id);
       if (error) throw error;
+
+      if (targetAd) {
+        await supabase.from('ad_cleanup_logs').insert({
+          ad_id: targetAd.id,
+          ad_reference_number: targetAd.reference_number,
+          ad_title: targetAd.title_fa || targetAd.title,
+          action: 'permanently_deleted',
+          reason: 'حذف دائمی توسط مدیریت',
+        });
+      }
+
       try {
         const { data: repRow } = await supabase
           .from('swedpersiska_settings')
@@ -353,6 +566,27 @@ export default async function handler(req, res) {
 
     if (action === 'dismiss_report') {
       const { reportId } = body;
+      const nowIso = new Date().toISOString();
+      try {
+        const { data: dismissed } = await supabase
+          .from('ad_reports')
+          .update({ status: 'dismissed', resolved_at: nowIso })
+          .eq('id', reportId)
+          .select('ad_id')
+          .maybeSingle();
+
+        if (dismissed?.ad_id) {
+          const { count: remainingOpen } = await supabase
+            .from('ad_reports')
+            .select('id', { count: 'exact', head: true })
+            .eq('ad_id', dismissed.ad_id)
+            .eq('status', 'open');
+          if ((remainingOpen || 0) === 0) {
+            await supabase.from('swedpersiska_ads').update({ is_disputed: false }).eq('id', dismissed.ad_id);
+          }
+        }
+      } catch {}
+
       const { data: repRow } = await supabase
         .from('swedpersiska_settings')
         .select('value')
@@ -363,7 +597,7 @@ export default async function handler(req, res) {
       const { error } = await supabase.from('swedpersiska_settings').upsert({
         key: 'ad_reports',
         value: nextList,
-        updated_at: new Date().toISOString()
+        updated_at: nowIso
       });
       if (error) throw error;
       return res.status(200).json({ ok: true });
@@ -435,7 +669,7 @@ export default async function handler(req, res) {
 
     if (action === 'save_settings') {
       const { key, value } = body;
-      const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'portal_countries', 'stripe_settings', 'turnstile_settings', 'analytics_settings', 'r2_settings', 'podcast_settings', 'seller_deployments', 'cloudflare_deploy_settings'];
+      const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'portal_countries', 'stripe_settings', 'turnstile_settings', 'analytics_settings', 'r2_settings', 'podcast_settings', 'seller_deployments', 'cloudflare_deploy_settings', 'ad_lifecycle_settings'];
       if (!allowedKeys.includes(key)) {
         return res.status(400).json({ ok: false, error: 'Invalid settings key' });
       }
@@ -849,6 +1083,198 @@ export default async function handler(req, res) {
       });
 
       return res.status(200).json({ ok: true, seller_deployments: nextList });
+    }
+
+    if (action === 'duplicate_reviews') {
+      const filter = String(body.filter || 'pending').trim();
+      let q = supabase
+        .from('ad_duplicate_reviews')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (filter && filter !== 'all') {
+        q = q.eq('resolution', filter);
+      }
+      const { data: reviews, error } = await q;
+      if (error) throw error;
+
+      const adIds = Array.from(
+        new Set((reviews || []).flatMap((r) => [r.ad_id, r.matched_ad_id]).filter(Boolean))
+      );
+      let adMap = new Map();
+      if (adIds.length > 0) {
+        const { data: adRows } = await supabase
+          .from('swedpersiska_ads')
+          .select('id, reference_number, title, title_fa, city, country, category, price, price_type, status, description, created_at')
+          .in('id', adIds);
+        adMap = new Map((adRows || []).map((a) => [a.id, a]));
+      }
+
+      const enriched = (reviews || []).map((r) => ({
+        ...r,
+        ad: adMap.get(r.ad_id) || null,
+        matched_ad: adMap.get(r.matched_ad_id) || null,
+      }));
+      return res.status(200).json({ ok: true, reviews: enriched });
+    }
+
+    if (action === 'resolve_duplicate_review') {
+      const { reviewId, decision, notes } = body;
+      if (!reviewId || !['cleared_by_admin', 'confirmed_duplicate'].includes(decision)) {
+        return res.status(400).json({ ok: false, error: 'شناسه یا نوع تصمیم نامعتبر است.' });
+      }
+      const nowIso = new Date().toISOString();
+      const { data: review, error: revErr } = await supabase
+        .from('ad_duplicate_reviews')
+        .update({
+          resolution: decision,
+          reviewer_notes: notes ? String(notes).slice(0, 500) : null,
+          resolved_at: nowIso,
+        })
+        .eq('id', reviewId)
+        .select('*')
+        .single();
+      if (revErr) throw revErr;
+
+      const { data: adRow } = await supabase
+        .from('swedpersiska_ads')
+        .select('id, reference_number, title, title_fa, contact_email')
+        .eq('id', review.ad_id)
+        .maybeSingle();
+
+      if (decision === 'cleared_by_admin') {
+        await supabase
+          .from('swedpersiska_ads')
+          .update({
+            duplicate_detection_status: 'cleared_by_admin',
+            status: 'active',
+            deleted_at: null,
+            last_meaningful_activity_at: nowIso,
+            sort_timestamp: nowIso,
+            cleanup_warning_sent_at: null,
+            scheduled_deletion_at: null,
+            updated_at: nowIso,
+          })
+          .eq('id', review.ad_id);
+
+        if (adRow) {
+          await supabase.from('ad_notifications').insert({
+            ad_id: adRow.id,
+            ad_reference_number: adRow.reference_number,
+            recipient_email: adRow.contact_email,
+            notification_type: 'duplicate_cleared',
+            title: 'آگهی شما تایید و منتشر شد',
+            message: `بررسی مدیریت تایید کرد که آگهی «${adRow.title_fa || adRow.title}» (${adRow.reference_number}) تکراری نیست و اکنون در سایت منتشر شده است.`,
+          });
+        }
+      } else {
+        await supabase
+          .from('swedpersiska_ads')
+          .update({
+            duplicate_detection_status: 'confirmed_duplicate',
+            status: 'rejected',
+            updated_at: nowIso,
+          })
+          .eq('id', review.ad_id);
+
+        if (adRow) {
+          await supabase.from('ad_notifications').insert({
+            ad_id: adRow.id,
+            ad_reference_number: adRow.reference_number,
+            recipient_email: adRow.contact_email,
+            notification_type: 'duplicate_rejected',
+            title: 'آگهی به دلیل تکرار رد شد',
+            message: `آگهی «${adRow.title_fa || adRow.title}» (${adRow.reference_number}) پس از بررسی به دلیل تشابه بالا با آگهی قبلی رد شد. لطفاً از قابلیت بوست رایگان آگهی قبلی استفاده کنید.`,
+          });
+        }
+      }
+
+      return res.status(200).json({ ok: true, review });
+    }
+
+    if (action === 'cleanup_overview') {
+      const [settingsRes, runsRes, logsRes, warnedRes, softDeletedRes, vipRes] = await Promise.all([
+        supabase.from('swedpersiska_settings').select('value').eq('key', 'ad_lifecycle_settings').maybeSingle(),
+        supabase.from('ad_cleanup_runs').select('*').order('started_at', { ascending: false }).limit(20),
+        supabase.from('ad_cleanup_logs').select('*').order('created_at', { ascending: false }).limit(50),
+        supabase.from('swedpersiska_ads').select('id', { count: 'exact', head: true }).not('cleanup_warning_sent_at', 'is', null).is('deleted_at', null),
+        supabase.from('swedpersiska_ads').select('id', { count: 'exact', head: true }).not('deleted_at', 'is', null),
+        supabase.from('swedpersiska_ads').select('id', { count: 'exact', head: true }).eq('is_featured', true).is('deleted_at', null),
+      ]);
+
+      return res.status(200).json({
+        ok: true,
+        settings: settingsRes.data?.value || {
+          enabled: true,
+          inactivityDays: 30,
+          warningDays: 7,
+          softDeleteRetentionDays: 30,
+          freeBoostCooldownDays: 7,
+        },
+        runs: runsRes.data || [],
+        logs: logsRes.data || [],
+        summary: {
+          warnedAds: warnedRes.count || 0,
+          softDeletedAds: softDeletedRes.count || 0,
+          protectedVipAds: vipRes.count || 0,
+        },
+      });
+    }
+
+    if (action === 'run_cleanup_now') {
+      const dryRun = Boolean(body.dryRun);
+      const { data: runResult, error: runErr } = await supabase.rpc('run_scheduled_ad_cleanup', {
+        p_trigger_source: 'admin_manual',
+        p_dry_run: dryRun,
+      });
+      if (runErr) throw runErr;
+
+      let storageDeleted = 0;
+      let permanentlyDeleted = 0;
+
+      if (!dryRun && runResult?.ok && !runResult.skipped_concurrent_run) {
+        const candidates = Array.isArray(runResult.purge_candidates) ? runResult.purge_candidates : [];
+        for (const candidate of candidates) {
+          const r2Res = await deleteR2ObjectsForAdAdmin(candidate.images, candidate.id);
+          storageDeleted += r2Res.deletedKeys.length;
+          if (r2Res.failedKeys.length > 0) {
+            await supabase.from('ad_cleanup_logs').insert({
+              run_id: runResult.run_id || null,
+              ad_id: candidate.id,
+              ad_reference_number: candidate.reference_number,
+              ad_title: candidate.title,
+              action: 'storage_cleanup_failed',
+              reason: 'خطا در پاکسازی فایل R2',
+              metadata: { failedKeys: r2Res.failedKeys },
+            });
+            continue;
+          }
+          const { error: delErr } = await supabase
+            .from('swedpersiska_ads')
+            .delete()
+            .eq('id', candidate.id)
+            .not('deleted_at', 'is', null);
+          if (!delErr) {
+            permanentlyDeleted += 1;
+            await supabase.rpc('log_permanent_ad_deletion', {
+              p_run_id: runResult.run_id || null,
+              p_ad_id: candidate.id,
+              p_reference_number: candidate.reference_number || null,
+              p_title: candidate.title || null,
+              p_deleted_keys: r2Res.deletedKeys,
+            });
+          }
+        }
+      }
+
+      return res.status(200).json({
+        ok: true,
+        result: {
+          ...runResult,
+          permanently_deleted_count: permanentlyDeleted,
+          storage_objects_deleted: storageDeleted,
+        },
+      });
     }
 
     return res.status(400).json({ ok: false, error: 'Unknown admin action' });
