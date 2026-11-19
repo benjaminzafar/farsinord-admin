@@ -11,6 +11,10 @@ import {
   chooseBestCompressedCandidate,
   compressImageForUpload,
 } from '../src/lib/imageCompressor.js';
+import {
+  DEFAULT_INDEXNOW_KEY,
+  buildIndexNowPayload,
+} from '../api/_lib/indexNow.js';
 
 // Set a test service-role env var before loading admin.js so HAS_SERVICE_ROLE matches server config;
 // validation (400) and auth (401) assertions return before any Supabase network call is issued.
@@ -276,4 +280,23 @@ test('Admin API upload_branding_file rejects decoded images larger than 1 MB wit
   assert.equal(state.statusCode, 400);
   assert.equal(state.body.ok, false);
   assert.ok(state.body.error);
+});
+
+test('Admin API enforces authentication on ping_indexnow and buildIndexNowPayload validates host URLs', async () => {
+  const { res, state } = createMockRes();
+  await adminHandler({ method: 'POST', headers: {}, body: { action: 'ping_indexnow' } }, res);
+  assert.equal(state.statusCode, 401);
+  assert.equal(state.body.ok, false);
+
+  const payload = buildIndexNowPayload([
+    'https://www.linksho.eu/?c=de',
+    'https://attacker.example/bad',
+    '/',
+  ]);
+  assert.equal(payload.host, 'www.linksho.eu');
+  assert.equal(payload.key, DEFAULT_INDEXNOW_KEY);
+  assert.deepEqual(payload.urlList, [
+    'https://www.linksho.eu/?c=de',
+    'https://www.linksho.eu/',
+  ]);
 });

@@ -1,6 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
 import { validateCleanupSettings, DEFAULT_CLEANUP_SETTINGS } from './_lib/cleanupSettingsValidation.js';
+import { notifyIndexNow, getIndexNowKey } from './_lib/indexNow.js';
+
+const CANONICAL_ORIGIN = (process.env.SITE_CANONICAL_URL || 'https://www.linksho.eu').replace(/\/+$/, '');
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://bezbnymjcnmazdonfzky.supabase.co';
 const HAS_SERVICE_ROLE = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -640,6 +643,27 @@ export default async function handler(req, res) {
       }
       const { error } = await supabase.from('swedpersiska_ads').update(updatePayload).eq('id', id);
       if (error) throw error;
+
+      if (status === 'active') {
+        const { data: activatedAd } = await supabase
+          .from('swedpersiska_ads')
+          .select('id, reference_number, country, category')
+          .eq('id', id)
+          .maybeSingle();
+        if (activatedAd) {
+          const slug = encodeURIComponent(activatedAd.reference_number || activatedAd.id);
+          const cId = encodeURIComponent(activatedAd.country || 'se');
+          await notifyIndexNow(
+            [
+              `${CANONICAL_ORIGIN}/?ad=${slug}`,
+              `${CANONICAL_ORIGIN}/?c=${cId}`,
+              activatedAd.category ? `${CANONICAL_ORIGIN}/?c=${cId}&cat=${encodeURIComponent(activatedAd.category)}` : '',
+              `${CANONICAL_ORIGIN}/`,
+            ].filter(Boolean),
+            { origin: CANONICAL_ORIGIN }
+          ).catch(() => {});
+        }
+      }
 
       if (status === 'active' || status === 'rejected') {
         await supabase
@@ -1340,7 +1364,7 @@ export default async function handler(req, res) {
 
       const { data: adRow } = await supabase
         .from('swedpersiska_ads')
-        .select('id, reference_number, title, title_fa, contact_email')
+        .select('id, reference_number, title, title_fa, contact_email, country, category')
         .eq('id', review.ad_id)
         .maybeSingle();
 
@@ -1360,6 +1384,17 @@ export default async function handler(req, res) {
           .eq('id', review.ad_id);
 
         if (adRow) {
+          const slug = encodeURIComponent(adRow.reference_number || adRow.id);
+          const cId = encodeURIComponent(adRow.country || 'se');
+          await notifyIndexNow(
+            [
+              `${CANONICAL_ORIGIN}/?ad=${slug}`,
+              `${CANONICAL_ORIGIN}/?c=${cId}`,
+              `${CANONICAL_ORIGIN}/`,
+            ],
+            { origin: CANONICAL_ORIGIN }
+          ).catch(() => {});
+
           await supabase.from('ad_notifications').insert({
             ad_id: adRow.id,
             ad_reference_number: adRow.reference_number,
@@ -1392,6 +1427,41 @@ export default async function handler(req, res) {
       }
 
       return res.status(200).json({ ok: true, review });
+    }
+
+    if (action === 'ping_indexnow') {
+      const { data: recentAds } = await supabase
+        .from('swedpersiska_ads')
+        .select('id, reference_number, country, category')
+        .eq('status', 'active')
+        .is('deleted_at', null)
+        .order('sort_timestamp', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      const baseCountries = ['se', 'no', 'dk', 'fi', 'de', 'at', 'nl', 'fr'];
+      const targetUrls = [
+        `${CANONICAL_ORIGIN}/`,
+        `${CANONICAL_ORIGIN}/?page=podcast`,
+        `${CANONICAL_ORIGIN}/?page=website-builder`,
+        ...baseCountries.map((c) => `${CANONICAL_ORIGIN}/?c=${c}`),
+        ...(recentAds || []).map(
+          (ad) => `${CANONICAL_ORIGIN}/?ad=${encodeURIComponent(ad.reference_number || ad.id)}`
+        ),
+      ];
+
+      const pushRes = await notifyIndexNow(targetUrls, { origin: CANONICAL_ORIGIN });
+      return res.status(200).json({
+        ok: pushRes.ok,
+        submittedCount: pushRes.submittedCount,
+        httpStatus: pushRes.status,
+        keyLocation: pushRes.keyLocation,
+        key: getIndexNowKey(),
+        urlsSample: targetUrls.slice(0, 10),
+        message: pushRes.ok
+          ? `${pushRes.submittedCount} آدرس فعال به شبکه IndexNow (Bing / Yandex / موتورهای هوش مصنوعی) ارسال شد.`
+          : `ارسال IndexNow با کد ${pushRes.status || 'نامشخص'} انجام شد (${pushRes.error || 'بررسی وضعیت کلید'}).`,
+      });
     }
 
     if (action === 'cleanup_overview') {

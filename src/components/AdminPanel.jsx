@@ -461,6 +461,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   };
   const [seoActiveCountry, setSeoActiveCountry] = useState('se');
   const [seoSettings, setSeoSettings] = useState(DEFAULT_COUNTRY_SEO);
+  const [indexNowLoading, setIndexNowLoading] = useState(false);
+  const [indexNowStatus, setIndexNowStatus] = useState(null);
 
   // Stripe & VIP Monetization State
   const [stripeSettings, setStripeSettings] = useState({
@@ -1775,6 +1777,34 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       triggerToast('خطا در ذخیره سئو: ' + err.message, 'error');
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const handlePingIndexNow = async () => {
+    setIndexNowLoading(true);
+    try {
+      const apiRes = await adminApi.request('ping_indexnow', {});
+      assertAdminApiResponse(apiRes, 'خطا در ارسال سیگنال IndexNow');
+      setIndexNowStatus({
+        ok: Boolean(apiRes.ok),
+        submittedCount: apiRes.submittedCount || 0,
+        httpStatus: apiRes.httpStatus || 0,
+        message: apiRes.message || 'ارسال انجام شد.',
+      });
+      triggerToast(
+        apiRes.message || `${apiRes.submittedCount || 0} آدرس به IndexNow ارسال شد.`,
+        apiRes.ok ? 'success' : 'error'
+      );
+    } catch (err) {
+      setIndexNowStatus({
+        ok: false,
+        submittedCount: 0,
+        httpStatus: 0,
+        message: err?.message || 'خطا در ارتباط با سرویس IndexNow',
+      });
+      triggerToast('خطا در ارسال IndexNow: ' + (err?.message || ''), 'error');
+    } finally {
+      setIndexNowLoading(false);
     }
   };
 
@@ -6594,7 +6624,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       <div className="rounded-xl bg-stone-50 p-4 space-y-1.5 text-right">
                         <div className="flex items-center justify-between text-[11px] text-stone-400">
                           <span>پیش‌نمایش زنده در نتایج گوگل ({cName})</span>
-                          <span className="font-mono" dir="ltr">linksho.com/?c={seoActiveCountry}</span>
+                          <span className="font-mono" dir="ltr">www.linksho.eu/?c={seoActiveCountry}</span>
                         </div>
                         <div className="text-sm font-bold text-[#1a0dab] truncate">
                           {curSeo?.title || 'عنوان سئو...'}
@@ -6797,6 +6827,62 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     </form>
                   );
                 })()}
+              </div>
+
+              {/* AI Search (GEO/AIO) & Instant Indexing (IndexNow / Sitemap / LLMs.txt) Card */}
+              <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-zinc-900">
+                      ایندکس فوری موتورهای جستجو و هوش مصنوعی (Google / Bing / ChatGPT / Perplexity)
+                    </h3>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      سئو سنتی (Sitemap, Schema @graph, Robots, RSS) و استاندارد جدید هوش مصنوعی (LLMs.txt و Crawler HTML) روی دامنه اصلی فعال است.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePingIndexNow}
+                    disabled={indexNowLoading}
+                    className="h-10 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold text-xs inline-flex items-center justify-center gap-2 shrink-0 active:scale-[0.98] transition-all cursor-pointer shadow-2xs"
+                  >
+                    <RefreshCw size={14} className={indexNowLoading ? 'animate-spin' : ''} />
+                    <span>{indexNowLoading ? 'در حال ارسال...' : 'ارسال فوری همه صفحات به IndexNow'}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+                  {[
+                    { label: 'نقشه سایت (Sitemap XML)', path: '/sitemap.xml' },
+                    { label: 'دستورالعمل خزنده‌ها (robots.txt)', path: '/robots.txt' },
+                    { label: 'معرفی سایت برای AI (llms.txt)', path: '/llms.txt' },
+                    { label: 'کاتالوگ کامل آگهی‌ها برای AI', path: '/llms-full.txt' },
+                    { label: 'فید خبری لحظه‌ای (RSS)', path: '/feed.xml' },
+                  ].map((item) => (
+                    <a
+                      key={item.path}
+                      href={`https://www.linksho.eu${item.path}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl bg-stone-50 hover:bg-blue-50/70 border border-stone-200/80 text-[11px] font-bold text-stone-700 hover:text-blue-700 transition-colors"
+                    >
+                      <span className="truncate">{item.label}</span>
+                      <ExternalLink size={12} className="shrink-0 opacity-70" />
+                    </a>
+                  ))}
+                </div>
+
+                {indexNowStatus && (
+                  <div
+                    className={`rounded-xl px-4 py-3 text-xs font-semibold border ${
+                      indexNowStatus.ok
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : 'bg-amber-50 text-amber-800 border-amber-200'
+                    }`}
+                  >
+                    {indexNowStatus.message}
+                  </div>
+                )}
               </div>
 
               {/* Google Analytics (GA4) Card */}
