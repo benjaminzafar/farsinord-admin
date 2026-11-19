@@ -1044,6 +1044,12 @@ export default async function handler(req, res) {
         if (pubKeyVal && !/^pk_(live|test)_[A-Za-z0-9]{12,}$/.test(pubKeyVal)) {
           return res.status(400).json({ ok: false, error: 'فرمت کلید عمومی Stripe (pk_live_... یا pk_test_...) نامعتبر است.' });
         }
+        if (pubKeyVal && modeVal === 'live' && !pubKeyVal.startsWith('pk_live_')) {
+          return res.status(400).json({ ok: false, error: 'در حالت عملیاتی (live) کلید عمومی باید با pk_live_ شروع شود.' });
+        }
+        if (pubKeyVal && modeVal === 'test' && !pubKeyVal.startsWith('pk_test_')) {
+          return res.status(400).json({ ok: false, error: 'در حالت آزمایشی (test) کلید عمومی باید با pk_test_ شروع شود.' });
+        }
         nextValue = {
           enabled: Boolean(value.enabled),
           mode: modeVal,
@@ -1419,8 +1425,14 @@ export default async function handler(req, res) {
       let isStripeLive = false;
 
       if (secretKey) {
+        const isLiveSecret = /^sk_live_|^rk_live_/.test(secretKey);
+        const isTestSecret = /^sk_test_|^rk_test_/.test(secretKey);
+        if (!isLiveSecret && !isTestSecret) {
+          return res.status(503).json({ ok: false, error: 'فرمت کلید امنیتی STRIPE_SECRET_KEY نامعتبر است.' });
+        }
         const params = new URLSearchParams();
         params.set('mode', 'payment');
+        params.set('expires_at', String(Math.floor(Date.now() / 1000) + 3600));
         params.set('success_url', `${CANONICAL_ORIGIN}/?page=website-builder&renew_session_id={CHECKOUT_SESSION_ID}`);
         params.set('cancel_url', `${CANONICAL_ORIGIN}/?page=website-builder&cancelled=1`);
         if (current.email) params.set('customer_email', current.email);
@@ -1447,7 +1459,7 @@ export default async function handler(req, res) {
           });
         }
         invoiceUrl = stripeJson.url;
-        isStripeLive = true;
+        isStripeLive = Boolean(isLiveSecret && stripeJson.livemode === true);
       }
 
       const nowIso = new Date().toISOString();

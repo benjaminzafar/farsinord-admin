@@ -63,12 +63,16 @@ REVOKE EXECUTE ON FUNCTION
   public._build_ad_public_json(public.swedpersiska_ads, boolean),
   public.is_ad_paid_protected(uuid),
   public.create_pending_ad_payment(uuid, text, text, numeric, text, integer),
+  public.activate_ad_promotion_from_payment(uuid, text, text, text, numeric, text),
+  public.sync_ad_payment_webhook_event(text, text, text, text),
   public.run_scheduled_ad_cleanup(text, boolean),
   public.log_permanent_ad_deletion(uuid, uuid, text, text, text[])
 FROM PUBLIC, anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION
   public.create_pending_ad_payment(uuid, text, text, numeric, text, integer),
+  public.activate_ad_promotion_from_payment(uuid, text, text, text, numeric, text),
+  public.sync_ad_payment_webhook_event(text, text, text, text),
   public.run_scheduled_ad_cleanup(text, boolean),
   public.log_permanent_ad_deletion(uuid, uuid, text, text, text[])
 TO service_role;
