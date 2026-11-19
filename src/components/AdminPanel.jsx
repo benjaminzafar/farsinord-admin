@@ -492,6 +492,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       protectPostAd: true
     };
   });
+  const [turnstileTestOpen, setTurnstileTestOpen] = useState(false);
+  const [turnstileTestResult, setTurnstileTestResult] = useState(null);
 
   // Google Analytics (GA4) State
   const [analyticsSettings, setAnalyticsSettings] = useState({
@@ -2192,15 +2194,32 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   // Save Cloudflare Turnstile Anti-Bot Settings (never persists secretKey to public settings table)
   const saveTurnstileSettings = async (e) => {
     if (e) e.preventDefault();
+    const cleanedSiteKey = String(turnstileSettings.siteKey || '').replace(/[\s\u200B-\u200D\uFEFF]/g, '');
+    if (turnstileSettings.enabled && turnstileSettings.mode === 'live') {
+      if (!cleanedSiteKey) {
+        triggerToast('در حالت عملیاتی وارد کردن کلید عمومی (Site Key) کلودفلر الزامی است.', 'error');
+        return;
+      }
+      if (cleanedSiteKey.length >= 30) {
+        triggerToast('طول کلید واردشده شبیه کلید محرمانه (Secret Key) است؛ لطفاً کلید عمومی کوتاه‌تر (Site Key) را وارد کنید.', 'error');
+        return;
+      }
+      if (!/^[0-9a-zA-Z_-]{16,29}$/.test(cleanedSiteKey)) {
+        triggerToast('فرمت کلید عمومی کلودفلر (Site Key) نامعتبر است.', 'error');
+        return;
+      }
+    }
+
     setSavingSettings(true);
     try {
       const publicTurnstilePayload = {
         enabled: turnstileSettings.enabled,
         mode: turnstileSettings.mode,
-        siteKey: (turnstileSettings.siteKey || '').trim(),
+        siteKey: cleanedSiteKey,
         protectAdminLogin: turnstileSettings.protectAdminLogin,
         protectPostAd: turnstileSettings.protectPostAd
       };
+      setTurnstileSettings(prev => ({ ...prev, siteKey: cleanedSiteKey }));
       localStorage.setItem('swedpersiska_turnstile_settings', JSON.stringify(publicTurnstilePayload));
       const apiRes = await adminApi.request('save_settings', { key: 'turnstile_settings', value: publicTurnstilePayload });
       assertAdminApiResponse(apiRes, 'خطا در ذخیره تنظیمات آنتی‌بات');
@@ -2459,7 +2478,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               <div className="pt-1 flex flex-col items-center justify-center">
                 <CloudflareTurnstile
                   theme="light"
-                  siteKey={turnstileSettings.mode === 'live' ? turnstileSettings.siteKey : undefined}
+                  mode={turnstileSettings.mode}
+                  siteKey={turnstileSettings.siteKey}
                   onVerify={(token) => {
                     setAdminTurnstileToken(token);
                     setLoginError('');
@@ -6083,6 +6103,63 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       />
                     </div>
                   </div>
+
+                  {/* Cloudflare Domain & Secret Key Setup Checklist */}
+                  <div className="rounded-xl bg-amber-50/80 border border-amber-200/80 p-3.5 space-y-1.5 text-[11px] text-amber-900 leading-relaxed">
+                    <p className="font-extrabold">چک‌لیست رفع خطای Invalid sitekey / دامنه:</p>
+                    <p>
+                      ۱) در پنل Cloudflare Turnstile وارد تنظیمات ویجت شوید و در بخش <strong>Hostname Management</strong> دقیقاً هر سه دامنه زیر را اضافه کنید:
+                      {' '}<code className="font-mono bg-white/80 px-1.5 py-0.5 rounded" dir="ltr">linksho.eu</code>
+                      {' '}، <code className="font-mono bg-white/80 px-1.5 py-0.5 rounded" dir="ltr">www.linksho.eu</code>
+                      {' '}و <code className="font-mono bg-white/80 px-1.5 py-0.5 rounded" dir="ltr">admin.linksho.eu</code>
+                    </p>
+                    <p>
+                      ۲) بررسی کنید فیلد بالا فقط <strong>Site Key</strong> (حدود ۲۴ کاراکتر) و متعلق به یک ویجت فعال و غیرحذف‌شده باشد (نه Secret Key بلندتر).
+                    </p>
+                    <p>
+                      ۳) اعتبارسنجی سرور از متغیر محیطی <code className="font-mono bg-white/80 px-1.5 py-0.5 rounded" dir="ltr">TURNSTILE_SECRET_KEY</code> در Vercel می‌خواند. تا زمان اصلاح ویجت کلودفلر، با تغییر «حالت اجرا» به <strong>آزمایشی</strong> سایت بلافاصله باز می‌شود.
+                    </p>
+                  </div>
+
+                  {/* Live Diagnostic Test Preview */}
+                  <div className="pt-1 flex flex-wrap items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTurnstileTestResult(null);
+                        setTurnstileTestOpen((prev) => !prev);
+                      }}
+                      className="h-9 px-4 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-800 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <ShieldCheck size={14} className="text-blue-600" />
+                      <span>{turnstileTestOpen ? 'بستن تست زنده کلید' : 'تست زنده کلید روی این صفحه'}</span>
+                    </button>
+                    {turnstileTestResult && (
+                      <span
+                        className={`text-[11px] font-bold px-3 py-1 rounded-lg border ${
+                          turnstileTestResult.ok
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-rose-50 text-rose-700 border-rose-200'
+                        }`}
+                      >
+                        {turnstileTestResult.text}
+                      </span>
+                    )}
+                  </div>
+
+                  {turnstileTestOpen && (
+                    <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-4 flex flex-col items-center justify-center">
+                      <CloudflareTurnstile
+                        key={`${turnstileSettings.mode}:${turnstileSettings.siteKey}`}
+                        theme="light"
+                        mode={turnstileSettings.mode}
+                        siteKey={turnstileSettings.siteKey}
+                        showDiagnosticErrors={true}
+                        onVerify={() => setTurnstileTestResult({ ok: true, text: 'کلید عمومی روی این دامنه تایید شد.' })}
+                        onError={(code) => setTurnstileTestResult({ ok: false, text: `کلودفلر خطای کد ${code || 'نامشخص'} برگرداند.` })}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <button
