@@ -49,7 +49,8 @@ import {
   Music,
   Headphones,
   Hammer,
-  Dumbbell
+  Dumbbell,
+  ChevronDown
 } from 'lucide-react';
 import CloudflareTurnstile from './CloudflareTurnstile';
 import AdCleanupSettingsSection from './AdCleanupSettingsSection';
@@ -206,7 +207,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [settingsSubTab, setSettingsSubTab] = useState(() => {
     try {
       const p = new URLSearchParams(window.location.search).get('tab');
-      if (p === 'monetization' || p === 'security' || p === 'cleanup') return p;
+      if (p === 'monetization' || p === 'security' || p === 'cleanup' || p === 'maps') return p;
     } catch {}
     return 'general';
   });
@@ -215,7 +216,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       const validTabs = ['overview', 'ads', 'websites', 'categories', 'settings', 'reports', 'lifecycle'];
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
-      if (tabParam === 'monetization' || tabParam === 'security' || tabParam === 'cleanup') {
+      if (tabParam === 'monetization' || tabParam === 'security' || tabParam === 'cleanup' || tabParam === 'maps') {
         return 'settings';
       }
       if (tabParam && validTabs.includes(tabParam)) {
@@ -233,7 +234,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const handleTabChange = (tab) => {
     playFeedback('click');
     let targetTab = tab;
-    if (tab === 'monetization' || tab === 'security' || tab === 'cleanup') {
+    if (tab === 'monetization' || tab === 'security' || tab === 'cleanup' || tab === 'maps') {
       targetTab = 'settings';
       setSettingsSubTab(tab);
     }
@@ -508,6 +509,16 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     measurementId: ''
   });
 
+  // Google Maps Embed Settings State
+  const [googleMapsSettings, setGoogleMapsSettings] = useState({
+    enabled: true,
+    embedApiKey: '',
+    defaultZoom: 14,
+  });
+  const [mapsTestOpen, setMapsTestOpen] = useState(false);
+  const [mapsTestAddress, setMapsTestAddress] = useState('Stockholm, Sweden');
+  const [mapsGuideOpen, setMapsGuideOpen] = useState(true);
+
   // Cloudflare R2 Storage State
   const [r2Settings, setR2Settings] = useState({
     enabled: false,
@@ -652,6 +663,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       }
       if (item.key === 'analytics_settings' && item.value) {
         setAnalyticsSettings(prev => ({ ...prev, ...item.value }));
+      }
+      if (item.key === 'google_maps_settings' && item.value && typeof item.value === 'object') {
+        setGoogleMapsSettings(prev => ({ ...prev, ...item.value }));
       }
       if (item.key === 'ad_reports' && Array.isArray(item.value)) {
         setAdReports(prev => (prev.length > item.value.length ? prev : item.value));
@@ -1846,6 +1860,68 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       setTimeout(() => setSaveSuccessMsg(''), 3500);
     } catch (err) {
       triggerToast('خطا در ذخیره تنظیمات آنالیتیکس: ' + err.message, 'error');
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const buildAdminPreviewMapUrl = (rawAddress, cfg) => {
+    const cleanQuery = String(rawAddress || '').replace(/[\p{Cc}<>]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 180);
+    if (!cleanQuery) return '';
+    const cleanKey = String(cfg?.embedApiKey || '').replace(/[\p{Cc}\s\u200B-\u200D\uFEFF]/gu, '').trim();
+    const zoomNum = Number(cfg?.defaultZoom);
+    const zoom = Number.isInteger(zoomNum) && zoomNum >= 1 && zoomNum <= 20 ? zoomNum : 14;
+    if (cleanKey && /^AIza[0-9A-Za-z_-]{20,60}$/.test(cleanKey)) {
+      const u = new URL('https://www.google.com/maps/embed/v1/place');
+      u.searchParams.set('key', cleanKey);
+      u.searchParams.set('q', cleanQuery);
+      u.searchParams.set('zoom', String(zoom));
+      u.searchParams.set('language', 'fa');
+      return u.toString();
+    }
+    const fallback = new URL('https://maps.google.com/maps');
+    fallback.searchParams.set('q', cleanQuery);
+    fallback.searchParams.set('t', '');
+    fallback.searchParams.set('z', String(zoom));
+    fallback.searchParams.set('ie', 'UTF8');
+    fallback.searchParams.set('iwloc', '');
+    fallback.searchParams.set('output', 'embed');
+    fallback.searchParams.set('hl', 'fa');
+    return fallback.toString();
+  };
+
+  const saveGoogleMapsSettings = async (e) => {
+    e.preventDefault();
+    const cleanKey = String(googleMapsSettings.embedApiKey || '')
+      .replace(/[\p{Cc}\s\u200B-\u200D\uFEFF]/gu, '')
+      .trim();
+    if (cleanKey && !/^AIza[0-9A-Za-z_-]{20,60}$/.test(cleanKey)) {
+      triggerToast('فرمت کلید Google Maps Embed API نامعتبر است (باید با AIza شروع شود یا برای حالت رایگان خالی بماند).', 'error');
+      return;
+    }
+    const zoomNum = Number(googleMapsSettings.defaultZoom) || 14;
+    if (!Number.isInteger(zoomNum) || zoomNum < 1 || zoomNum > 20) {
+      triggerToast('بزرگ‌نمایی پیش‌فرض باید عدد صحیح بین ۱ تا ۲۰ باشد.', 'error');
+      return;
+    }
+    const payload = {
+      enabled: googleMapsSettings.enabled !== false,
+      embedApiKey: cleanKey,
+      defaultZoom: zoomNum,
+    };
+    setGoogleMapsSettings(payload);
+    setSavingSettings(true);
+    try {
+      const apiRes = await adminApi.request('save_settings', { key: 'google_maps_settings', value: payload });
+      assertAdminApiResponse(apiRes, 'خطا در ذخیره تنظیمات نقشه گوگل');
+      const msg = cleanKey
+        ? 'تنظیمات نقشه گوگل با کلید رسمی Embed API ذخیره شد!'
+        : 'تنظیمات نقشه گوگل (حالت رایگان بدون کلید) ذخیره شد!';
+      setSaveSuccessMsg(msg);
+      triggerToast(msg, 'success');
+      setTimeout(() => setSaveSuccessMsg(''), 3500);
+    } catch (err) {
+      triggerToast('خطا در ذخیره تنظیمات نقشه گوگل: ' + err.message, 'error');
     } finally {
       setSavingSettings(false);
     }
@@ -5472,6 +5548,22 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 badgeIdleClass: turnstileSettings.enabled ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70' : 'bg-[#F5F5F7] text-[#6E6E73]',
               },
               {
+                id: 'maps',
+                label: 'نقشه گوگل (Maps)',
+                Icon: MapPin,
+                badge: googleMapsSettings.enabled === false
+                  ? 'غیرفعال'
+                  : googleMapsSettings.embedApiKey
+                    ? 'کلید رسمی'
+                    : 'رایگان',
+                badgeActiveClass: 'bg-white/20 text-white',
+                badgeIdleClass: googleMapsSettings.enabled === false
+                  ? 'bg-[#F5F5F7] text-[#6E6E73]'
+                  : googleMapsSettings.embedApiKey
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70'
+                    : 'bg-blue-50 text-blue-700 border border-blue-200/70',
+              },
+              {
                 id: 'podcast',
                 label: 'پادکست خبری و یوتیوب',
                 Icon: Headphones,
@@ -7114,6 +7206,263 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 </form>
               </div>
 
+            </div>
+              )}
+
+              {settingsSubTab === 'maps' && (
+            <div className="space-y-6 w-full py-2 animate-in fade-in duration-150 ease-out">
+              <div className="border-b border-stone-200/80 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-black text-zinc-900">تنظیمات نقشه گوگل (Google Maps Embed)</h2>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    تبدیل خودکار آدرس آگهی به نقشه رایگان گوگل در مرحله ثبت آگهی و در کنار تصویر صفحه جزئیات آگهی.
+                  </p>
+                </div>
+                <span className={`self-start sm:self-auto px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                  googleMapsSettings.enabled === false
+                    ? 'bg-stone-100 text-stone-600 border-stone-200'
+                    : googleMapsSettings.embedApiKey
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-blue-50 text-blue-700 border-blue-200'
+                }`}>
+                  {googleMapsSettings.enabled === false
+                    ? 'غیرفعال'
+                    : googleMapsSettings.embedApiKey
+                      ? 'فعال (کلید رسمی رایگان Embed API)'
+                      : 'فعال (حالت رایگان بدون کلید)'}
+                </span>
+              </div>
+
+              {saveSuccessMsg && (
+                <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs font-bold flex items-center gap-2">
+                  <CheckCircle size={16} className="text-emerald-600" />
+                  <span>{saveSuccessMsg}</span>
+                </div>
+              )}
+
+              {/* Settings Form Card */}
+              <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-5">
+                <form onSubmit={saveGoogleMapsSettings} className="space-y-4">
+                  <label className="flex items-center justify-between p-4 rounded-xl bg-stone-50 hover:bg-stone-100/70 border border-stone-200/80 cursor-pointer transition-all shadow-2xs">
+                    <div className="space-y-0.5">
+                      <span className="block text-xs font-extrabold text-zinc-900">فعال‌سازی نمایش نقشه گوگل در سایت</span>
+                      <span className="block text-[11px] text-stone-500">
+                        اگر غیرفعال شود، نقشه در فرم ثبت آگهی و صفحه آگهی نمایش داده نمی‌شود و هیچ درخواستی به گوگل ارسال نمی‌گردد.
+                      </span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={googleMapsSettings.enabled !== false}
+                      onChange={(e) => setGoogleMapsSettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                      className="h-4 w-4 accent-[#0066CC] rounded cursor-pointer shrink-0"
+                    />
+                  </label>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="md:col-span-2 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="block text-xs font-bold text-stone-700">
+                          کلید Google Maps Embed API <span className="text-stone-400 font-normal">(اختیاری — ۱۰۰٪ رایگان)</span>
+                        </label>
+                        {googleMapsSettings.embedApiKey && (
+                          <button
+                            type="button"
+                            onClick={() => setGoogleMapsSettings(prev => ({ ...prev, embedApiKey: '' }))}
+                            className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer"
+                          >
+                            پاک کردن کلید (حالت رایگان بدون کلید)
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        dir="ltr"
+                        placeholder="AIzaSy... (خالی = حالت رایگان خودکار بدون کلید)"
+                        value={googleMapsSettings.embedApiKey || ''}
+                        onChange={(e) => setGoogleMapsSettings(prev => ({ ...prev, embedApiKey: e.target.value }))}
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
+                      />
+                      <p className="text-[11px] text-stone-500 leading-relaxed">
+                        اگر این فیلد خالی باشد، نقشه به‌صورت خودکار در حالت رایگان بدون کلید کار می‌کند. برای دقت بهتر آدرس‌های اروپایی و کنترل کامل روی دامنه، کلید محدودشده <strong>Maps Embed API</strong> را اینجا وارد کنید.
+                      </p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-stone-700">بزرگ‌نمایی پیش‌فرض آدرس</label>
+                      <select
+                        value={Number(googleMapsSettings.defaultZoom) || 14}
+                        onChange={(e) => setGoogleMapsSettings(prev => ({ ...prev, defaultZoom: Number(e.target.value) }))}
+                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs font-semibold text-zinc-900 focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
+                      >
+                        <option value={12}>۱۲ — نمای شهر</option>
+                        <option value={13}>۱۳ — نمای منطقه</option>
+                        <option value={14}>۱۴ — محله و خیابان (پیشنهادی)</option>
+                        <option value={15}>۱۵ — خیابان دقیق</option>
+                        <option value={16}>۱۶ — نمای خیلی نزدیک</option>
+                      </select>
+                      <p className="text-[11px] text-stone-500">آگهی‌های بدون نام محله به‌صورت خودکار در نمای شهر (۱۲) نمایش داده می‌شوند.</p>
+                    </div>
+                  </div>
+
+                  {/* High-Security Domain Lock Helper Box */}
+                  <div className="rounded-xl bg-blue-50/60 border border-blue-200/70 p-4 space-y-2.5">
+                    <div className="flex items-center gap-2 text-xs font-extrabold text-blue-950">
+                      <Lock size={15} className="text-blue-700 shrink-0" />
+                      <span>قفل امنیتی اجباری در Google Cloud (حداکثر امنیت و هزینه ۰ دلار)</span>
+                    </div>
+                    <p className="text-[11.5px] text-blue-900/90 leading-relaxed">
+                      کلید Maps Embed API در کد صفحه مرورگر دیده می‌شود (مشابه کلید عمومی Stripe یا Turnstile)؛ بنابراین امنیت آن باید در پنل گوگل با <strong>۲ قفل همزمان</strong> تضمین شود: (۱) محدود کردن به دامنه‌های زیر، و (۲) محدود کردن API فقط به <strong dir="ltr">Maps Embed API</strong>.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                      {['https://www.linksho.eu/*', 'https://linksho.eu/*', 'https://admin.linksho.eu/*'].map((domainPattern) => (
+                        <button
+                          key={domainPattern}
+                          type="button"
+                          onClick={() => copyText(domainPattern, `gmap-${domainPattern}`, domainPattern)}
+                          className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-white border border-blue-200/80 hover:border-blue-400 text-[11px] font-mono text-zinc-800 transition-colors cursor-pointer"
+                          title="کلیک برای کپی"
+                        >
+                          <span dir="ltr" className="truncate">{domainPattern}</span>
+                          {copiedKey === `gmap-${domainPattern}` ? (
+                            <Check size={13} className="text-emerald-600 shrink-0" />
+                          ) : (
+                            <Copy size={13} className="text-blue-600 shrink-0" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 flex-wrap pt-1">
+                    <button
+                      type="submit"
+                      disabled={savingSettings}
+                      className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black disabled:opacity-50 text-white font-bold text-xs flex items-center gap-2 shadow-2xs active:scale-[0.98] transition-all cursor-pointer"
+                    >
+                      <Save size={15} />
+                      <span>ذخیره تنظیمات نقشه گوگل</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setMapsTestOpen(v => !v)}
+                      className="h-10 px-4 rounded-xl bg-stone-100 hover:bg-stone-200/80 text-zinc-800 font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <Eye size={15} />
+                      <span>{mapsTestOpen ? 'بستن پیش‌نمایش زنده' : 'تست زنده نقشه روی این صفحه'}</span>
+                    </button>
+                  </div>
+                </form>
+
+                {/* Live Map Diagnostic Preview */}
+                {mapsTestOpen && (
+                  <div className="pt-4 border-t border-stone-200/80 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                      <input
+                        type="text"
+                        dir="ltr"
+                        value={mapsTestAddress}
+                        onChange={(e) => setMapsTestAddress(e.target.value)}
+                        placeholder="Stockholm, Sweden"
+                        className="flex-1 h-9 rounded-xl bg-stone-50 border border-stone-200/80 px-3 text-xs font-mono text-zinc-900 focus:border-stone-400 focus:outline-none"
+                      />
+                      <span className="text-[11px] font-semibold text-stone-500 shrink-0">
+                        حالت فعلی: {googleMapsSettings.embedApiKey ? 'کلید رسمی Embed API v1' : 'رایگان بدون کلید'}
+                      </span>
+                    </div>
+                    <div className="rounded-xl overflow-hidden border border-stone-200/80 bg-stone-100 h-60">
+                      <iframe
+                        title="تست زنده نقشه گوگل"
+                        src={buildAdminPreviewMapUrl(mapsTestAddress, googleMapsSettings)}
+                        loading="lazy"
+                        allowFullScreen
+                        referrerPolicy="strict-origin-when-cross-origin"
+                        className="w-full h-full border-0"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Step-by-Step Persian Setup & High-Security Tutorial */}
+              <div className="rounded-2xl bg-white border border-stone-200/80 overflow-hidden shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+                <button
+                  type="button"
+                  onClick={() => setMapsGuideOpen(v => !v)}
+                  className="w-full px-5 sm:px-6 py-4 flex items-center justify-between gap-3 text-right hover:bg-stone-50/70 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-50 text-blue-700 shrink-0">
+                      <BookOpen size={16} />
+                    </div>
+                    <div>
+                      <h3 className="text-xs sm:text-sm font-black text-zinc-900">
+                        آموزش گام‌به‌گام دریافت و امن‌سازی کلید رایگان Google Maps
+                      </h3>
+                      <p className="text-[11px] text-stone-500 mt-0.5">
+                        مسیر دقیق در Google Cloud Console • سرویس Maps Embed API کاملاً رایگان و نامحدود ($0) است
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronDown
+                    size={16}
+                    className={`text-stone-500 shrink-0 transition-transform ${mapsGuideOpen ? 'rotate-180' : ''}`}
+                  />
+                </button>
+
+                {mapsGuideOpen && (
+                  <div className="px-5 sm:px-6 pb-6 pt-2 border-t border-stone-100 space-y-4 text-xs text-stone-700 leading-relaxed">
+                    <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200/70 text-emerald-900 text-[11.5px] leading-relaxed">
+                      <strong>نکته مهم:</strong> اگر فعلاً نخواهید کلید بسازید، با خالی گذاشتن کادر بالا، نقشه گوگل <strong>همین الان به‌صورت رایگان</strong> کار می‌کند. مراحل زیر برای زمانی است که بخواهید از کلید رسمی و دامنه-قفل‌شده گوگل استفاده کنید.
+                    </div>
+
+                    <ol className="space-y-3 list-decimal ps-5">
+                      <li>
+                        <strong>ساخت پروژه در Google Cloud:</strong> وارد{' '}
+                        <a href="https://console.cloud.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-700 font-bold underline inline-flex items-center gap-0.5">
+                          <span dir="ltr">console.cloud.google.com</span>
+                          <ExternalLink size={11} />
+                        </a>{' '}
+                        شوید، پروژه جدیدی با نام مثلاً <span dir="ltr" className="font-mono bg-stone-100 px-1.5 py-0.5 rounded">LinkSho-Maps</span> بسازید و از منوی <strong>Billing</strong> یک کارت بانکی صرفاً جهت تایید حساب متصل کنید (تا زمانی که کلید را طبق مرحله ۴ محدود کنید، مبلغ قبض همیشه <strong>$0</strong> خواهد بود).
+                      </li>
+                      <li>
+                        <strong>فعال‌سازی فقط Maps Embed API:</strong> به مسیر{' '}
+                        <a href="https://console.cloud.google.com/apis/library/maps-embed-backend.googleapis.com" target="_blank" rel="noopener noreferrer" className="text-blue-700 font-bold underline inline-flex items-center gap-0.5">
+                          <span>APIs &amp; Services ← Library ← Maps Embed API</span>
+                          <ExternalLink size={11} />
+                        </a>{' '}
+                        بروید و روی <strong>Enable</strong> کلیک کنید. <strong>هشدار:</strong> سرویس‌های پولی مثل Maps JavaScript API، Places API یا Geocoding API را فعال نکنید.
+                      </li>
+                      <li>
+                        <strong>ساخت کلید API:</strong> به مسیر{' '}
+                        <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-blue-700 font-bold underline inline-flex items-center gap-0.5">
+                          <span>APIs &amp; Services ← Credentials</span>
+                          <ExternalLink size={11} />
+                        </a>{' '}
+                        بروید، روی <strong>+ Create Credentials ← API key</strong> کلیک کنید، کلید (<span dir="ltr" className="font-mono">AIza...</span>) را کپی کرده و بلافاصله روی <strong>Edit API key</strong> بزنید.
+                      </li>
+                      <li>
+                        <strong>قفل امنیتی دوگانه (بسیار مهم):</strong>
+                        <ul className="list-disc ps-5 mt-1 space-y-1 text-[11.5px]">
+                          <li>در بخش <strong>Application restrictions</strong> گزینه <strong>Websites</strong> را انتخاب کرده و هر ۳ الگوی دامنه بالا (<span dir="ltr" className="font-mono">https://www.linksho.eu/*</span> و <span dir="ltr" className="font-mono">https://linksho.eu/*</span> و <span dir="ltr" className="font-mono">https://admin.linksho.eu/*</span>) را وارد کنید.</li>
+                          <li>در بخش <strong>API restrictions</strong> گزینه <strong>Restrict key</strong> را انتخاب کرده و <strong>فقط و فقط تیک Maps Embed API</strong> را بزنید و <strong>Save</strong> کنید.</li>
+                        </ul>
+                      </li>
+                      <li>
+                        <strong>هشدار بودجه (اطمینان ۱۰۰٪):</strong> در مسیر{' '}
+                        <a href="https://console.cloud.google.com/billing/budgets" target="_blank" rel="noopener noreferrer" className="text-blue-700 font-bold underline inline-flex items-center gap-0.5">
+                          <span>Billing ← Budgets &amp; alerts</span>
+                          <ExternalLink size={11} />
+                        </a>{' '}
+                        یک هشدار ماهانه روی <strong>1 USD / 10 SEK</strong> بسازید.
+                      </li>
+                      <li>
+                        <strong>ذخیره و تست زنده:</strong> کلید را در کادر بالای همین صفحه Paste کنید، دکمه <strong>ذخیره تنظیمات نقشه گوگل</strong> را بزنید و روی <strong>«تست زنده نقشه روی این صفحه»</strong> کلیک کنید تا از صحت نمایش نقشه مطمئن شوید.
+                      </li>
+                    </ol>
+                  </div>
+                )}
+              </div>
             </div>
               )}
 

@@ -53,7 +53,8 @@ CREATE POLICY "Public read safe settings"
   USING (key IN (
     'site_branding', 'seo_settings', 'portal_categories', 'portal_cities',
     'portal_countries', 'stripe_settings', 'turnstile_settings',
-    'analytics_settings', 'podcast_settings', 'ad_lifecycle_settings'
+    'analytics_settings', 'google_maps_settings', 'podcast_settings',
+    'ad_lifecycle_settings'
   ));
 
 -- 5. Lock down internal/admin SECURITY DEFINER helper RPCs from public REST invocation

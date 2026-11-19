@@ -1000,7 +1000,7 @@ export default async function handler(req, res) {
 
     if (action === 'save_settings') {
       const { key, value } = body;
-      const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'portal_countries', 'stripe_settings', 'turnstile_settings', 'analytics_settings', 'r2_settings', 'podcast_settings', 'seller_deployments', 'cloudflare_deploy_settings', 'ad_lifecycle_settings'];
+      const allowedKeys = ['site_branding', 'seo_settings', 'portal_categories', 'portal_cities', 'portal_countries', 'stripe_settings', 'turnstile_settings', 'analytics_settings', 'google_maps_settings', 'r2_settings', 'podcast_settings', 'seller_deployments', 'cloudflare_deploy_settings', 'ad_lifecycle_settings'];
       if (!allowedKeys.includes(key)) {
         return res.status(400).json({ ok: false, error: 'Invalid settings key' });
       }
@@ -1052,6 +1052,34 @@ export default async function handler(req, res) {
           currency: currencyVal,
           vipDurationDays: durationNum,
           vipBadgeText: String(value.vipBadgeText || 'ویژه (VIP)').trim().slice(0, 40) || 'ویژه (VIP)',
+        };
+      } else if (key === 'google_maps_settings') {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          return res.status(400).json({ ok: false, error: 'فرمت تنظیمات نقشه گوگل نامعتبر است.' });
+        }
+        const cleanEmbedKey = String(value.embedApiKey || '')
+          .replace(/[\p{Cc}\s\u200B-\u200D\uFEFF]/gu, '')
+          .trim();
+        if (cleanEmbedKey && !/^AIza[0-9A-Za-z_-]{20,60}$/.test(cleanEmbedKey)) {
+          return res.status(400).json({
+            ok: false,
+            error: 'فرمت کلید Google Maps Embed API نامعتبر است (باید با AIza شروع شود یا برای حالت رایگان بدون کلید خالی گذاشته شود).',
+          });
+        }
+        const rawZoom =
+          value.defaultZoom === undefined || value.defaultZoom === null || value.defaultZoom === ''
+            ? 14
+            : Number(value.defaultZoom);
+        if (!Number.isInteger(rawZoom) || rawZoom < 1 || rawZoom > 20) {
+          return res.status(400).json({
+            ok: false,
+            error: 'سطح بزرگ‌نمایی پیش‌فرض نقشه باید عدد صحیح بین ۱ تا ۲۰ باشد.',
+          });
+        }
+        nextValue = {
+          enabled: value.enabled !== false,
+          embedApiKey: cleanEmbedKey,
+          defaultZoom: rawZoom,
         };
       }
       if (key === 'cloudflare_deploy_settings' && value && typeof value === 'object') {
