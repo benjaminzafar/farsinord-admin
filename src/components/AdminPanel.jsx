@@ -2518,7 +2518,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   // ========================================================
   return (
     <main 
-      className="admin-scope h-[100dvh] w-full overflow-hidden bg-[#f4f1ea] text-zinc-900 font-vazir select-none flex flex-col lg:flex-row p-0 lg:p-4 lg:gap-4" 
+      className="admin-scope h-[100dvh] w-full overflow-hidden bg-[#F5F5F7] text-[#1D1D1F] font-vazir select-none flex flex-col lg:flex-row p-0 lg:p-4 lg:gap-4" 
       dir="rtl"
       data-testid="admin-page"
     >
@@ -5434,155 +5434,133 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           {/* ========================================================
               TAB 3: SETTINGS (BRANDING, SEO & COUNTRIES, STRIPE, SECURITY)
           ======================================================== */}
-          {activeTab === 'settings' && (
-            <div className="space-y-5 w-full max-w-4xl mx-auto py-1">
-              {/* Sub-Navigation Pills */}
-              <div className="p-1.5 rounded-2xl border border-stone-200/80 bg-white flex flex-wrap items-center gap-1.5 w-fit max-w-full">
-                <button
-                  type="button"
-                  onClick={() => { playFeedback('click'); setSettingsSubTab('general'); setSaveSuccessMsg(''); }}
-                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
-                    settingsSubTab === 'general'
-                      ? 'bg-slate-900 text-white'
-                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
-                  }`}
-                >
-                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
-                    <SlidersHorizontal size={14} strokeWidth={2} className="block" />
-                  </span>
-                  <span className="leading-none">مشخصات برند و فوتر</span>
-                </button>
+          {activeTab === 'settings' && (() => {
+            const settingsTabs = [
+              { id: 'general', label: 'مشخصات برند و فوتر', Icon: SlidersHorizontal, badge: null, badgeActiveClass: '', badgeIdleClass: '' },
+              { id: 'seo', label: 'کشورها، پس‌زمینه و سئو', Icon: Globe2, badge: null, badgeActiveClass: '', badgeIdleClass: '' },
+              {
+                id: 'monetization',
+                label: 'درگاه پرداخت و تعرفه',
+                Icon: WalletCards,
+                badge: stripeSettings.mode === 'live' ? 'عملیاتی' : 'آزمایشی',
+                badgeActiveClass: 'bg-white/20 text-white',
+                badgeIdleClass: 'bg-amber-50 text-amber-700 border border-amber-200/70',
+              },
+              {
+                id: 'security',
+                label: 'امنیت سیستم',
+                Icon: ShieldCheck,
+                badge: turnstileSettings.enabled ? 'فعال' : 'غیرفعال',
+                badgeActiveClass: turnstileSettings.enabled ? 'bg-white/20 text-white' : 'bg-white/15 text-white/80',
+                badgeIdleClass: turnstileSettings.enabled ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70' : 'bg-[#F5F5F7] text-[#6E6E73]',
+              },
+              {
+                id: 'podcast',
+                label: 'پادکست خبری و یوتیوب',
+                Icon: Headphones,
+                badge: (podcastSettings.youtubeChannelUrl || (podcastSettings.manualVideos || []).length > 0) ? 'متصل' : 'خالی',
+                badgeActiveClass: 'bg-white/20 text-white',
+                badgeIdleClass: (podcastSettings.youtubeChannelUrl || (podcastSettings.manualVideos || []).length > 0) ? 'bg-rose-50 text-rose-700 border border-rose-200/70' : 'bg-[#F5F5F7] text-[#6E6E73]',
+              },
+              {
+                id: 'r2',
+                label: 'فضای ابری R2',
+                Icon: ImageIcon,
+                badge: r2Settings.enabled ? 'فعال' : 'غیرفعال',
+                badgeActiveClass: 'bg-white/20 text-white',
+                badgeIdleClass: r2Settings.enabled ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70' : 'bg-[#F5F5F7] text-[#6E6E73]',
+              },
+              {
+                id: 'cleanup',
+                label: 'تنظیمات پاکسازی آگهی‌ها',
+                Icon: Trash2,
+                badge: lifecycleSettings.enabled !== false ? 'فعال' : 'غیرفعال',
+                badgeActiveClass: 'bg-white/20 text-white',
+                badgeIdleClass: lifecycleSettings.enabled !== false ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/70' : 'bg-[#F5F5F7] text-[#6E6E73]',
+              },
+            ];
 
-                <button
-                  type="button"
-                  onClick={() => { playFeedback('click'); setSettingsSubTab('seo'); setSaveSuccessMsg(''); }}
-                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
-                    settingsSubTab === 'seo'
-                      ? 'bg-slate-900 text-white'
-                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
-                  }`}
-                >
-                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
-                    <Globe2 size={14} strokeWidth={2} className="block" />
-                  </span>
-                  <span className="leading-none">کشورها، پس‌زمینه و سئو</span>
-                </button>
+            const handleSelectSubTab = (tabId) => {
+              playFeedback('click');
+              setSettingsSubTab(tabId);
+              setSaveSuccessMsg('');
+              if (tabId === 'cleanup') {
+                fetchLifecycleData(dupReviewFilter);
+              }
+            };
 
-                <button
-                  type="button"
-                  onClick={() => { playFeedback('click'); setSettingsSubTab('monetization'); setSaveSuccessMsg(''); }}
-                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
-                    settingsSubTab === 'monetization'
-                      ? 'bg-slate-900 text-white'
-                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
-                  }`}
-                >
-                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
-                    <WalletCards size={14} strokeWidth={2} className="block" />
-                  </span>
-                  <span className="leading-none">درگاه پرداخت و تعرفه</span>
-                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none ${
-                    settingsSubTab === 'monetization'
-                      ? 'bg-white/15 text-amber-200'
-                      : 'bg-amber-50 text-amber-700 border border-amber-200/70'
-                  }`}>
-                    {stripeSettings.mode === 'live' ? 'عملیاتی' : 'آزمایشی'}
-                  </span>
-                </button>
+            const activeSocialCount = [
+              socialInstagram,
+              socialTelegram,
+              socialWhatsapp,
+              socialYoutube,
+              socialLinkedin,
+            ].filter((val) => Boolean(String(val || '').trim())).length;
 
-                <button
-                  type="button"
-                  onClick={() => { playFeedback('click'); setSettingsSubTab('security'); setSaveSuccessMsg(''); }}
-                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
-                    settingsSubTab === 'security'
-                      ? 'bg-slate-900 text-white'
-                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
-                  }`}
-                >
-                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
-                    <ShieldCheck size={14} strokeWidth={2} className="block" />
-                  </span>
-                  <span className="leading-none">امنیت سیستم</span>
-                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none ${
-                    turnstileSettings.enabled
-                      ? (settingsSubTab === 'security' ? 'bg-emerald-500/30 text-emerald-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70')
-                      : (settingsSubTab === 'security' ? 'bg-white/15 text-stone-300' : 'bg-stone-100 text-stone-500')
-                  }`}>
-                    {turnstileSettings.enabled ? 'فعال' : 'غیرفعال'}
-                  </span>
-                </button>
+            return (
+              <div className="w-full max-w-6xl mx-auto py-1 space-y-4 xl:space-y-0 xl:grid xl:grid-cols-[260px_minmax(0,1fr)] xl:gap-5 items-start">
+                {/* Mobile / Tablet Single-Row Scrollable Pill Bar */}
+                <div className="xl:hidden p-1.5 rounded-2xl border border-[#E5E5EA] bg-[#FBFBFC] shadow-[0_1px_3px_rgba(29,29,31,0.04)] flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                  {settingsTabs.map(({ id, label, Icon, badge, badgeActiveClass, badgeIdleClass }) => {
+                    const isActive = settingsSubTab === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => handleSelectSubTab(id)}
+                        className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center gap-2 whitespace-nowrap shrink-0 transition-all cursor-pointer ${
+                          isActive
+                            ? 'bg-[#0066CC] text-white shadow-[0_4px_12px_rgba(0,102,204,0.22)]'
+                            : 'text-[#1D1D1F] hover:bg-[#ECECEF]/80'
+                        }`}
+                      >
+                        <Icon size={14} strokeWidth={2} className="shrink-0" />
+                        <span>{label}</span>
+                        {badge && (
+                          <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none ${isActive ? badgeActiveClass : badgeIdleClass}`}>
+                            {badge}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
 
-                <button
-                  type="button"
-                  onClick={() => { playFeedback('click'); setSettingsSubTab('podcast'); setSaveSuccessMsg(''); }}
-                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
-                    settingsSubTab === 'podcast'
-                      ? 'bg-slate-900 text-white'
-                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
-                  }`}
-                >
-                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
-                    <Headphones size={14} strokeWidth={2} className="block" />
-                  </span>
-                  <span className="leading-none">پادکست خبری و یوتیوب</span>
-                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none ${
-                    podcastSettings.youtubeChannelUrl || (podcastSettings.manualVideos || []).length > 0
-                      ? (settingsSubTab === 'podcast' ? 'bg-rose-500/30 text-rose-200' : 'bg-rose-50 text-rose-700 border border-rose-200/70')
-                      : (settingsSubTab === 'podcast' ? 'bg-white/15 text-stone-300' : 'bg-stone-100 text-stone-500')
-                  }`}>
-                    {(podcastSettings.youtubeChannelUrl || (podcastSettings.manualVideos || []).length > 0) ? 'متصل' : 'خالی'}
-                  </span>
-                </button>
+                {/* Desktop Sticky Settings Navigation Sidebar */}
+                <aside className="hidden xl:block sticky top-18 rounded-2xl bg-[#FBFBFC] border border-[#E5E5EA] p-2 shadow-[0_1px_3px_rgba(29,29,31,0.04)] space-y-1">
+                  {settingsTabs.map(({ id, label, Icon, badge, badgeActiveClass, badgeIdleClass }) => {
+                    const isActive = settingsSubTab === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => handleSelectSubTab(id)}
+                        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold text-right transition-all cursor-pointer ${
+                          isActive
+                            ? 'bg-[#0066CC] text-white shadow-[0_4px_14px_rgba(0,102,204,0.22)]'
+                            : 'text-[#1D1D1F] hover:bg-[#ECECEF]/70'
+                        }`}
+                      >
+                        <span
+                          className={`flex h-7 w-7 items-center justify-center rounded-lg shrink-0 ${
+                            isActive ? 'bg-white/20 text-white' : 'bg-[#F5F5F7] text-[#6E6E73]'
+                          }`}
+                        >
+                          <Icon size={15} strokeWidth={2} />
+                        </span>
+                        <span className="truncate leading-snug">{label}</span>
+                        {badge && (
+                          <span className={`ms-auto px-2 py-0.5 rounded-full text-[10px] font-bold leading-none shrink-0 ${isActive ? badgeActiveClass : badgeIdleClass}`}>
+                            {badge}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </aside>
 
-                <button
-                  type="button"
-                  onClick={() => { playFeedback('click'); setSettingsSubTab('r2'); setSaveSuccessMsg(''); }}
-                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
-                    settingsSubTab === 'r2'
-                      ? 'bg-slate-900 text-white'
-                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
-                  }`}
-                >
-                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
-                    <ImageIcon size={14} strokeWidth={2} className="block" />
-                  </span>
-                  <span className="leading-none">فضای ابری R2</span>
-                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none ${
-                    r2Settings.enabled
-                      ? (settingsSubTab === 'r2' ? 'bg-emerald-500/30 text-emerald-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70')
-                      : (settingsSubTab === 'r2' ? 'bg-white/15 text-stone-300' : 'bg-stone-100 text-stone-500')
-                  }`}>
-                    {r2Settings.enabled ? 'فعال' : 'غیرفعال'}
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    playFeedback('click');
-                    setSettingsSubTab('cleanup');
-                    setSaveSuccessMsg('');
-                    fetchLifecycleData(dupReviewFilter);
-                  }}
-                  className={`h-9 px-3.5 rounded-xl text-xs font-bold leading-none inline-flex items-center justify-center gap-2 whitespace-nowrap transition-colors cursor-pointer ${
-                    settingsSubTab === 'cleanup'
-                      ? 'bg-slate-900 text-white'
-                      : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100/80'
-                  }`}
-                >
-                  <span className="flex h-4 w-4 items-center justify-center shrink-0">
-                    <Trash2 size={14} strokeWidth={2} className="block" />
-                  </span>
-                  <span className="leading-none">تنظیمات پاکسازی آگهی‌ها</span>
-                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold leading-none ${
-                    lifecycleSettings.enabled !== false
-                      ? (settingsSubTab === 'cleanup' ? 'bg-emerald-500/30 text-emerald-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200/70')
-                      : (settingsSubTab === 'cleanup' ? 'bg-white/15 text-stone-300' : 'bg-stone-100 text-stone-500')
-                  }`}>
-                    {lifecycleSettings.enabled !== false ? 'فعال' : 'غیرفعال'}
-                  </span>
-                </button>
-              </div>
+                {/* Active Settings Panel Column */}
+                <div className="min-w-0 w-full space-y-5">
 
               {settingsSubTab === 'podcast' && (
             <div className="space-y-6 w-full py-2 animate-in fade-in duration-150 ease-out">
@@ -6175,267 +6153,369 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               )}
 
               {settingsSubTab === 'general' && (
-            <div className="space-y-6 w-full py-2 animate-in fade-in duration-150 ease-out">
-              
-              <div className="border-b border-stone-200/80 pb-4">
-                <h2 className="text-base font-black text-zinc-900">مشخصات برند، تماس و شبکه‌های اجتماعی</h2>
-                <p className="text-xs text-stone-500 mt-0.5">نام سایت، لوگو، اطلاعات پشتیبانی و لینک شبکه‌های اجتماعی فوتر</p>
+            <form onSubmit={saveBrandingSettings} className="space-y-4 w-full animate-in fade-in duration-150 ease-out">
+              {/* Top Section Header Card + Live Brand Preview */}
+              <div className="rounded-2xl bg-[#FBFBFC] border border-[#E5E5EA] p-4 sm:p-5 shadow-[0_1px_3px_rgba(29,29,31,0.04)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="h-10 w-10 rounded-xl bg-[#EAF2FB] text-[#0066CC] flex items-center justify-center shrink-0">
+                    <SlidersHorizontal size={18} strokeWidth={2} />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-sm sm:text-base font-black text-[#1D1D1F]">
+                      مشخصات برند، تماس و شبکه‌های اجتماعی
+                    </h2>
+                    <p className="text-[11px] sm:text-xs text-[#6E6E73] mt-0.5">
+                      نام سایت، لوگو، اطلاعات پشتیبانی و لینک شبکه‌های اجتماعی فوتر
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2.5 px-3 py-2 rounded-xl bg-[#F5F5F7] border border-[#E5E5EA] shrink-0 max-w-full">
+                  <div className="h-8 w-8 rounded-lg bg-white border border-[#E5E5EA] flex items-center justify-center overflow-hidden shrink-0">
+                    {logoUrl ? (
+                      <img
+                        key={logoUrl}
+                        src={logoUrl}
+                        alt={siteName || 'لوگو'}
+                        className="h-full w-full object-contain p-1"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    ) : (
+                      <ImageIcon size={14} className="text-[#86868B]" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-extrabold text-[#1D1D1F] truncate max-w-[160px]">
+                      {siteName || 'لینک شو'}
+                    </p>
+                    <p className="text-[10px] text-[#6E6E73] truncate max-w-[180px]">
+                      {siteSlogan || 'نیازمندی‌های فارسی‌زبانان اروپا'}
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {saveSuccessMsg && (
                 <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200/80 text-emerald-800 text-xs font-bold flex items-center gap-2">
-                  <CheckCircle size={16} className="text-emerald-600" />
+                  <CheckCircle size={16} className="text-emerald-600 shrink-0" />
                   <span>{saveSuccessMsg}</span>
                 </div>
               )}
 
-              {/* Site Branding Form */}
-              <form onSubmit={saveBrandingSettings} className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
-                <h3 className="text-xs font-extrabold text-zinc-900">مشخصات سایت</h3>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Card 1: Brand Identity, Logo & Favicon */}
+              <div className="rounded-2xl bg-[#FBFBFC] border border-[#E5E5EA] p-5 sm:p-6 shadow-[0_1px_3px_rgba(29,29,31,0.04)] space-y-5">
+                <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#ECECEF]">
                   <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">نام سایت</label>
+                    <h3 className="text-xs sm:text-sm font-extrabold text-[#1D1D1F]">هویت بصری و برند</h3>
+                    <p className="text-[11px] text-[#6E6E73] mt-0.5">عنوان رسمی پلتفرم و فایل‌های لوگو و آیکون مرورگر روی فضای ابری R2</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">نام سایت</label>
                     <input
                       type="text"
                       value={siteName}
                       onChange={(e) => setSiteName(e.target.value)}
-                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
+                      className="w-full h-11 rounded-xl bg-[#F5F5F7] focus:bg-white border border-[#E5E5EA] px-3.5 text-xs text-[#1D1D1F] focus:border-[#0066CC] focus:ring-2 focus:ring-[#0066CC]/15 focus:outline-none transition-all"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">شعار</label>
+                    <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">شعار</label>
                     <input
                       type="text"
                       value={siteSlogan}
                       onChange={(e) => setSiteSlogan(e.target.value)}
-                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
+                      className="w-full h-11 rounded-xl bg-[#F5F5F7] focus:bg-white border border-[#E5E5EA] px-3.5 text-xs text-[#1D1D1F] focus:border-[#0066CC] focus:ring-2 focus:ring-[#0066CC]/15 focus:outline-none transition-all"
                     />
                   </div>
                 </div>
 
-                {/* Logo & Favicon Upload + URL Inputs with Live Preview */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-stone-700">
-                      لوگو سایت (آپلود مستقیم یا لینک)
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <label className="h-10 px-3.5 rounded-xl bg-[#0066CC] hover:bg-[#0055AA] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors active:scale-95">
-                        <Plus size={14} />
-                        <span>{uploadingBrandKey === 'logo' ? 'در حال آپلود...' : 'آپلود لوگو'}</span>
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
-                          disabled={uploadingBrandKey !== null}
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            e.target.value = '';
-                            handleBrandingFileUpload(f, 'logo');
-                          }}
-                          className="hidden"
-                        />
-                      </label>
+                {/* Dedicated Logo & Favicon Asset Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Site Logo Card */}
+                  <div className="rounded-2xl border border-[#E5E5EA] bg-[#F5F5F7]/70 p-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-14 w-14 rounded-2xl bg-white border border-[#E5E5EA] flex items-center justify-center overflow-hidden shrink-0 shadow-2xs">
+                        {logoUrl ? (
+                          <img
+                            key={`asset-${logoUrl}`}
+                            src={logoUrl}
+                            alt="پیش‌نمایش لوگو"
+                            className="h-full w-full object-contain p-2"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        ) : (
+                          <ImageIcon size={20} className="text-[#86868B]" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h4 className="text-xs font-extrabold text-[#1D1D1F]">لوگوی اصلی سایت</h4>
+                        <p className="text-[11px] text-[#6E6E73] mt-0.5">PNG، WebP یا SVG — فشرده‌سازی خودکار تا ۱ مگابایت</p>
+                        <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                          <label className="h-8 px-3.5 rounded-full bg-[#0066CC] hover:bg-[#0055AA] text-white text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors active:scale-95">
+                            <Plus size={13} />
+                            <span>{uploadingBrandKey === 'logo' ? 'در حال آپلود...' : 'آپلود لوگو'}</span>
+                            <input
+                              type="file"
+                              accept="image/png,image/jpeg,image/webp,image/svg+xml,.svg"
+                              disabled={uploadingBrandKey !== null}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                e.target.value = '';
+                                handleBrandingFileUpload(f, 'logo');
+                              }}
+                              className="hidden"
+                            />
+                          </label>
+                          {logoUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setLogoUrl('')}
+                              className="h-8 px-3 rounded-full border border-[#E5E5EA] bg-white hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 text-[#6E6E73] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer transition-colors"
+                            >
+                              <Trash2 size={12} />
+                              <span>حذف</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#6E6E73] mb-1">لینک مستقیم لوگو (اختیاری)</label>
                       <input
                         type="url"
                         value={logoUrl}
                         onChange={(e) => setLogoUrl(e.target.value)}
-                        placeholder="https://.../logo.png"
-                        className="flex-1 min-w-0 h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs text-left"
+                        placeholder="https://.../logo.webp"
+                        className="w-full h-10 rounded-xl bg-white border border-[#E5E5EA] px-3 text-[11px] text-[#1D1D1F] font-mono focus:border-[#0066CC] focus:ring-2 focus:ring-[#0066CC]/15 focus:outline-none transition-all text-left"
                         dir="ltr"
                       />
-                      {logoUrl && (
-                        <div className="relative shrink-0">
-                          <img
-                            src={logoUrl}
-                            alt="پیش‌نمایش لوگو"
-                            className="h-10 w-10 rounded-xl object-contain border border-stone-200 bg-stone-50 p-1"
-                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setLogoUrl('')}
-                            className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-rose-600 text-white flex items-center justify-center cursor-pointer"
-                            title="حذف لوگو"
-                          >
-                            <X size={10} />
-                          </button>
-                        </div>
-                      )}
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-stone-700">
-                      آیکون تب مرورگر / Favicon (آپلود مستقیم یا لینک)
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <label className="h-10 px-3.5 rounded-xl bg-[#0066CC] hover:bg-[#0055AA] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors active:scale-95">
-                        <Plus size={14} />
-                        <span>{uploadingBrandKey === 'favicon' ? 'در حال آپلود...' : 'آپلود آیکون'}</span>
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon,.ico,.svg"
-                          disabled={uploadingBrandKey !== null}
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            e.target.value = '';
-                            handleBrandingFileUpload(f, 'favicon');
-                          }}
-                          className="hidden"
-                        />
-                      </label>
+                  {/* Favicon Card */}
+                  <div className="rounded-2xl border border-[#E5E5EA] bg-[#F5F5F7]/70 p-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-14 w-14 rounded-2xl bg-white border border-[#E5E5EA] flex items-center justify-center overflow-hidden shrink-0 shadow-2xs">
+                        {faviconUrl ? (
+                          <img
+                            key={`fav-${faviconUrl}`}
+                            src={faviconUrl}
+                            alt="پیش‌نمایش آیکون"
+                            className="h-full w-full object-contain p-2.5"
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                          />
+                        ) : (
+                          <Globe2 size={20} className="text-[#86868B]" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h4 className="text-xs font-extrabold text-[#1D1D1F]">آیکون تب مرورگر (Favicon)</h4>
+                        <p className="text-[11px] text-[#6E6E73] mt-0.5">PNG، WebP، SVG یا ICO — حداکثر ۱ مگابایت</p>
+                        <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                          <label className="h-8 px-3.5 rounded-full bg-[#0066CC] hover:bg-[#0055AA] text-white text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors active:scale-95">
+                            <Plus size={13} />
+                            <span>{uploadingBrandKey === 'favicon' ? 'در حال آپلود...' : 'آپلود آیکون'}</span>
+                            <input
+                              type="file"
+                              accept="image/png,image/jpeg,image/webp,image/svg+xml,image/x-icon,.ico,.svg"
+                              disabled={uploadingBrandKey !== null}
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                e.target.value = '';
+                                handleBrandingFileUpload(f, 'favicon');
+                              }}
+                              className="hidden"
+                            />
+                          </label>
+                          {faviconUrl && (
+                            <button
+                              type="button"
+                              onClick={() => setFaviconUrl('')}
+                              className="h-8 px-3 rounded-full border border-[#E5E5EA] bg-white hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 text-[#6E6E73] text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer transition-colors"
+                            >
+                              <Trash2 size={12} />
+                              <span>حذف</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#6E6E73] mb-1">لینک مستقیم آیکون (اختیاری)</label>
                       <input
                         type="url"
                         value={faviconUrl}
                         onChange={(e) => setFaviconUrl(e.target.value)}
-                        placeholder="https://.../favicon.png"
-                        className="flex-1 min-w-0 h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs text-left"
+                        placeholder="https://.../favicon.webp"
+                        className="w-full h-10 rounded-xl bg-white border border-[#E5E5EA] px-3 text-[11px] text-[#1D1D1F] font-mono focus:border-[#0066CC] focus:ring-2 focus:ring-[#0066CC]/15 focus:outline-none transition-all text-left"
                         dir="ltr"
                       />
-                      {faviconUrl && (
-                        <div className="relative shrink-0">
-                          <img
-                            src={faviconUrl}
-                            alt="پیش‌نمایش آیکون"
-                            className="h-10 w-10 rounded-xl object-contain border border-stone-200 bg-stone-50 p-1.5"
-                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setFaviconUrl('')}
-                            className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-rose-600 text-white flex items-center justify-center cursor-pointer"
-                            title="حذف آیکون"
-                          >
-                            <X size={10} />
-                          </button>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
+              </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">ایمیل</label>
-                    <input
-                      type="email"
-                      value={supportEmail}
-                      onChange={(e) => setSupportEmail(e.target.value)}
-                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs text-left"
-                      dir="ltr"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">تلگرام</label>
-                    <input
-                      type="text"
-                      value={supportTelegram}
-                      onChange={(e) => setSupportTelegram(e.target.value)}
-                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs text-left"
-                      dir="ltr"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-stone-700 mb-1.5">تلفن</label>
-                    <input
-                      type="text"
-                      value={supportPhone}
-                      onChange={(e) => setSupportPhone(e.target.value)}
-                      placeholder="+46..."
-                      className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs text-left"
-                      dir="ltr"
-                    />
-                  </div>
+              {/* Card 2: Support Contact Details */}
+              <div className="rounded-2xl bg-[#FBFBFC] border border-[#E5E5EA] p-5 sm:p-6 shadow-[0_1px_3px_rgba(29,29,31,0.04)] space-y-4">
+                <div className="pb-3 border-b border-[#ECECEF]">
+                  <h3 className="text-xs sm:text-sm font-extrabold text-[#1D1D1F]">اطلاعات تماس و پشتیبانی</h3>
+                  <p className="text-[11px] text-[#6E6E73] mt-0.5">راه‌های ارتباطی رسمی جهت نمایش در بخش پشتیبانی و صفحات حقوقی سایت</p>
                 </div>
 
-                {/* Footer Social Media Links (Displayed under Footer Logo) */}
-                <div className="pt-4 border-t border-stone-200/80 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <h4 className="text-xs font-extrabold text-zinc-900">شبکه‌های اجتماعی فوتر (نمایش زیر لوگوی فوتر)</h4>
-                    <p className="text-[11px] text-stone-500 mt-0.5">
+                    <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">ایمیل پشتیبانی</label>
+                    <div className="relative">
+                      <Mail size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#86868B] pointer-events-none" />
+                      <input
+                        type="email"
+                        value={supportEmail}
+                        onChange={(e) => setSupportEmail(e.target.value)}
+                        placeholder="support@linksho.eu"
+                        className="w-full h-11 rounded-xl bg-[#F5F5F7] focus:bg-white border border-[#E5E5EA] pl-10 pr-3.5 text-xs text-[#1D1D1F] font-mono focus:border-[#0066CC] focus:ring-2 focus:ring-[#0066CC]/15 focus:outline-none transition-all text-left"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">تلگرام پشتیبانی</label>
+                    <div className="relative">
+                      <Send size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#86868B] pointer-events-none" />
+                      <input
+                        type="text"
+                        value={supportTelegram}
+                        onChange={(e) => setSupportTelegram(e.target.value)}
+                        placeholder="@linkshoofficial"
+                        className="w-full h-11 rounded-xl bg-[#F5F5F7] focus:bg-white border border-[#E5E5EA] pl-10 pr-3.5 text-xs text-[#1D1D1F] font-mono focus:border-[#0066CC] focus:ring-2 focus:ring-[#0066CC]/15 focus:outline-none transition-all text-left"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">تلفن پشتیبانی</label>
+                    <div className="relative">
+                      <Phone size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#86868B] pointer-events-none" />
+                      <input
+                        type="text"
+                        value={supportPhone}
+                        onChange={(e) => setSupportPhone(e.target.value)}
+                        placeholder="+46..."
+                        className="w-full h-11 rounded-xl bg-[#F5F5F7] focus:bg-white border border-[#E5E5EA] pl-10 pr-3.5 text-xs text-[#1D1D1F] font-mono focus:border-[#0066CC] focus:ring-2 focus:ring-[#0066CC]/15 focus:outline-none transition-all text-left"
+                        dir="ltr"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 3: Footer Social Media Links */}
+              <div className="rounded-2xl bg-[#FBFBFC] border border-[#E5E5EA] p-5 sm:p-6 shadow-[0_1px_3px_rgba(29,29,31,0.04)] space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#ECECEF]">
+                  <div>
+                    <h3 className="text-xs sm:text-sm font-extrabold text-[#1D1D1F]">شبکه‌های اجتماعی فوتر</h3>
+                    <p className="text-[11px] text-[#6E6E73] mt-0.5">
                       هر شبکه‌ای را که پر کنید، آیکون آن زیر لوگو در فوتر سایت نمایش داده می‌شود (برای مخفی کردن، فیلد را خالی بگذارید).
                     </p>
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">اینستاگرام (Instagram)</label>
-                      <input
-                        type="text"
-                        value={socialInstagram}
-                        onChange={(e) => setSocialInstagram(e.target.value)}
-                        placeholder="https://instagram.com/..."
-                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all text-left"
-                        dir="ltr"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">تلگرام (Telegram)</label>
-                      <input
-                        type="text"
-                        value={socialTelegram}
-                        onChange={(e) => setSocialTelegram(e.target.value)}
-                        placeholder="https://t.me/..."
-                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all text-left"
-                        dir="ltr"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">واتساپ (WhatsApp)</label>
-                      <input
-                        type="text"
-                        value={socialWhatsapp}
-                        onChange={(e) => setSocialWhatsapp(e.target.value)}
-                        placeholder="+46700000000"
-                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all text-left"
-                        dir="ltr"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">یوتیوب (YouTube)</label>
-                      <input
-                        type="text"
-                        value={socialYoutube}
-                        onChange={(e) => setSocialYoutube(e.target.value)}
-                        placeholder="https://youtube.com/@..."
-                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all text-left"
-                        dir="ltr"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1">لینکدین (LinkedIn)</label>
-                      <input
-                        type="text"
-                        value={socialLinkedin}
-                        onChange={(e) => setSocialLinkedin(e.target.value)}
-                        placeholder="https://linkedin.com/company/..."
-                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all text-left"
-                        dir="ltr"
-                      />
-                    </div>
-                  </div>
+                  <span className="inline-flex items-center px-3 py-1 rounded-full bg-[#EAF2FB] text-[#0066CC] border border-[#CDE0F5] text-[11px] font-bold shrink-0 w-fit">
+                    {activeSocialCount} از ۵ شبکه فعال
+                  </span>
                 </div>
 
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    disabled={savingSettings}
-                    className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black text-white font-bold text-xs flex items-center gap-2 shadow-2xs active:scale-[0.98] transition-all cursor-pointer"
-                  >
-                    <Save size={15} />
-                    <span>ذخیره مشخصات</span>
-                  </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {[
+                    {
+                      key: 'instagram',
+                      label: 'اینستاگرام',
+                      eng: 'Instagram',
+                      val: socialInstagram,
+                      setVal: setSocialInstagram,
+                      placeholder: 'https://instagram.com/...',
+                    },
+                    {
+                      key: 'telegram',
+                      label: 'تلگرام',
+                      eng: 'Telegram',
+                      val: socialTelegram,
+                      setVal: setSocialTelegram,
+                      placeholder: 'https://t.me/...',
+                    },
+                    {
+                      key: 'whatsapp',
+                      label: 'واتساپ',
+                      eng: 'WhatsApp',
+                      val: socialWhatsapp,
+                      setVal: setSocialWhatsapp,
+                      placeholder: '+46700000000',
+                    },
+                    {
+                      key: 'youtube',
+                      label: 'یوتیوب',
+                      eng: 'YouTube',
+                      val: socialYoutube,
+                      setVal: setSocialYoutube,
+                      placeholder: 'https://youtube.com/@...',
+                    },
+                    {
+                      key: 'linkedin',
+                      label: 'لینکدین',
+                      eng: 'LinkedIn',
+                      val: socialLinkedin,
+                      setVal: setSocialLinkedin,
+                      placeholder: 'https://linkedin.com/company/...',
+                    },
+                  ].map((item) => {
+                    const isFilled = Boolean(String(item.val || '').trim());
+                    return (
+                      <div key={item.key}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <label className="inline-flex items-center gap-2 text-xs font-bold text-[#1D1D1F]">
+                            <span
+                              className={`h-2 w-2 rounded-full ${
+                                isFilled ? 'bg-emerald-500' : 'bg-[#D2D2D7]'
+                              }`}
+                            />
+                            <span>{item.label}</span>
+                          </label>
+                          <span className="text-[10px] font-mono text-[#86868B]">{item.eng}</span>
+                        </div>
+                        <input
+                          type="text"
+                          value={item.val}
+                          onChange={(e) => item.setVal(e.target.value)}
+                          placeholder={item.placeholder}
+                          className="w-full h-11 rounded-xl bg-[#F5F5F7] focus:bg-white border border-[#E5E5EA] px-3.5 text-xs text-[#1D1D1F] font-mono focus:border-[#0066CC] focus:ring-2 focus:ring-[#0066CC]/15 focus:outline-none transition-all text-left"
+                          dir="ltr"
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
-              </form>
-            </div>
+              </div>
+
+              {/* Sticky / Clean Save Action Bar */}
+              <div className="rounded-2xl bg-[#FBFBFC] border border-[#E5E5EA] px-5 py-4 shadow-[0_1px_3px_rgba(29,29,31,0.04)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <p className="text-[11px] text-[#6E6E73]">
+                  تغییرات پس از ذخیره بلافاصله در هدر و فوتر وب‌سایت اعمال می‌شوند.
+                </p>
+                <button
+                  type="submit"
+                  disabled={savingSettings}
+                  className="h-11 px-7 rounded-full bg-[#0066CC] hover:bg-[#0055AA] disabled:opacity-60 text-white font-bold text-xs inline-flex items-center justify-center gap-2 shadow-[0_6px_18px_rgba(0,102,204,0.22)] active:scale-[0.97] transition-all cursor-pointer shrink-0"
+                >
+                  <Save size={15} />
+                  <span>{savingSettings ? 'در حال ذخیره...' : 'ذخیره مشخصات'}</span>
+                </button>
+              </div>
+            </form>
               )}
 
               {settingsSubTab === 'seo' && (
@@ -7161,8 +7241,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   lastCleanupResult={lastCleanupResult}
                 />
               )}
-            </div>
-          )}
+                </div>
+              </div>
+            );
+          })()}
 
         </div>
 
