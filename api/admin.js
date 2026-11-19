@@ -8,7 +8,8 @@ const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABAS
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 15;
+export const MAX_BRANDING_BYTES = 1048576; // Strict 1 MB limit per branding/hero image
 const FALLBACK_SECRET_SEED = `${supabaseKey}:${process.env.ADMIN_PASSWORD || process.env.VITE_ADMIN_PASSWORD || 'Sam@13321332'}:linksho-admin-v1`;
 const DETERMINISTIC_FALLBACK_SECRET = crypto.createHash('sha256').update(FALLBACK_SECRET_SEED, 'utf8').digest('hex');
 const TOKEN_SECRET = process.env.ADMIN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || DETERMINISTIC_FALLBACK_SECRET;
@@ -23,6 +24,7 @@ const BRANDING_MIME_TYPES = {
   'image/jpg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
+  'image/avif': 'avif',
   'image/svg+xml': 'svg',
   'image/x-icon': 'ico',
   'image/vnd.microsoft.icon': 'ico',
@@ -32,7 +34,17 @@ function encodeRfc3986(str) {
   return encodeURIComponent(str).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
-function createR2PresignedPutUrl({ accountId, accessKeyId, secretAccessKey, bucketName, objectKey, contentType, expiresSeconds = 300 }) {
+function createR2PresignedPutUrl({
+  accountId,
+  accessKeyId,
+  secretAccessKey,
+  bucketName,
+  objectKey,
+  contentType,
+  contentLength,
+  cacheControl,
+  expiresSeconds = 300,
+}) {
   const host = `${accountId}.r2.cloudflarestorage.com`;
   const region = 'auto';
   const service = 's3';
@@ -42,12 +54,28 @@ function createR2PresignedPutUrl({ accountId, accessKeyId, secretAccessKey, buck
   const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
   const canonicalUri = `/${bucketName}/${objectKey.split('/').map(encodeRfc3986).join('/')}`;
 
+  const headerPairs = [
+    ['content-type', contentType],
+    ['host', host],
+  ];
+  const parsedLen = Number(contentLength);
+  if (Number.isInteger(parsedLen) && parsedLen > 0) {
+    headerPairs.push(['content-length', String(parsedLen)]);
+  }
+  if (cacheControl) {
+    headerPairs.push(['cache-control', String(cacheControl)]);
+  }
+  headerPairs.sort((a, b) => a[0].localeCompare(b[0]));
+
+  const signedHeaders = headerPairs.map(([k]) => k).join(';');
+  const canonicalHeaders = headerPairs.map(([k, v]) => `${k}:${v}\n`).join('');
+
   const queryParams = {
     'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
     'X-Amz-Credential': `${accessKeyId}/${credentialScope}`,
     'X-Amz-Date': amzDate,
     'X-Amz-Expires': String(expiresSeconds),
-    'X-Amz-SignedHeaders': 'content-type;host',
+    'X-Amz-SignedHeaders': signedHeaders,
   };
 
   const canonicalQuery = Object.keys(queryParams)
@@ -55,8 +83,7 @@ function createR2PresignedPutUrl({ accountId, accessKeyId, secretAccessKey, buck
     .map((k) => `${encodeRfc3986(k)}=${encodeRfc3986(queryParams[k])}`)
     .join('&');
 
-  const canonicalHeaders = `content-type:${contentType}\nhost:${host}\n`;
-  const canonicalRequest = ['PUT', canonicalUri, canonicalQuery, canonicalHeaders, 'content-type;host', 'UNSIGNED-PAYLOAD'].join('\n');
+  const canonicalRequest = ['PUT', canonicalUri, canonicalQuery, canonicalHeaders, signedHeaders, 'UNSIGNED-PAYLOAD'].join('\n');
   const hash = crypto.createHash('sha256').update(canonicalRequest, 'utf8').digest('hex');
   const stringToSign = ['AWS4-HMAC-SHA256', amzDate, credentialScope, hash].join('\n');
 
@@ -329,7 +356,7 @@ export default async function handler(req, res) {
 
     // 3. Protected Admin Actions
     if (action === 'overview') {
-      const [firstPageRes, metaRes, settingsRes, dupCountRes, openReportsRes] = await Promise.all([
+      const [firstPageRes, statsRpcRes, settingsRes, dupCountRes, openReportsRes] = await Promise.all([
         supabase
           .from('swedpersiska_ads')
           .select('*')
@@ -340,7 +367,9 @@ export default async function handler(req, res) {
           .order('created_at', { ascending: false })
           .order('id', { ascending: false })
           .range(0, PAGE_SIZE - 1),
-        supabase.from('swedpersiska_ads').select('category, country, status, is_featured, promotion_expires_at, cleanup_warning_sent_at, deleted_at, views_count, created_at'),
+        HAS_SERVICE_ROLE
+          ? supabase.rpc('get_admin_overview_stats')
+          : Promise.resolve({ data: null, error: null }),
         supabase.from('swedpersiska_settings').select('*'),
         HAS_SERVICE_ROLE
           ? supabase.from('ad_duplicate_reviews').select('id', { count: 'exact', head: true }).eq('resolution', 'pending')
@@ -350,64 +379,95 @@ export default async function handler(req, res) {
           : Promise.resolve({ data: [] }),
       ]);
 
-      const countryStats = {
-        se: { total: 0, active: 0, vip: 0, views: 0 },
-        no: { total: 0, active: 0, vip: 0, views: 0 },
-        dk: { total: 0, active: 0, vip: 0, views: 0 },
-        fi: { total: 0, active: 0, vip: 0, views: 0 },
-        de: { total: 0, active: 0, vip: 0, views: 0 },
-        at: { total: 0, active: 0, vip: 0, views: 0 },
-        nl: { total: 0, active: 0, vip: 0, views: 0 },
-        fr: { total: 0, active: 0, vip: 0, views: 0 }
-      };
-      const categoryCounts = {};
-      const monthBuckets = {};
-      let totalCount = 0;
-      let activeCount = 0;
-      let pendingCount = 0;
-      let vipCount = 0;
-      let softDeletedCount = 0;
-      let warnedCount = 0;
-      let totalViews = 0;
-      const nowMs = Date.now();
+      let counts;
+      let countryStats;
+      let categoryCounts;
+      let monthBuckets;
 
-      (metaRes.data || []).forEach((row) => {
-        if (row.deleted_at || row.status === 'deleted') {
-          softDeletedCount++;
-          return;
-        }
-        totalCount++;
-        const c = row.country || 'se';
-        if (!countryStats[c]) countryStats[c] = { total: 0, active: 0, vip: 0, views: 0 };
-        countryStats[c].total++;
-        if (row.status === 'active') {
-          activeCount++;
-          countryStats[c].active++;
-        } else if (row.status === 'pending') {
-          pendingCount++;
-        }
-        if (row.cleanup_warning_sent_at) {
-          warnedCount++;
-        }
-        const isVipActive = Boolean(row.is_featured && (!row.promotion_expires_at || Date.parse(row.promotion_expires_at) > nowMs));
-        if (isVipActive) {
-          vipCount++;
-          countryStats[c].vip++;
-        }
-        countryStats[c].views += row.views_count || 1;
-        totalViews += row.views_count || 1;
-        if (row.category) {
-          categoryCounts[row.category] = (categoryCounts[row.category] || 0) + 1;
-        }
-        if (row.created_at) {
-          const ym = String(row.created_at).slice(0, 7);
-          if (/^\d{4}-\d{2}$/.test(ym)) {
-            if (!monthBuckets[ym]) monthBuckets[ym] = { total: 0, vip: 0 };
-            monthBuckets[ym].total++;
-            if (isVipActive) monthBuckets[ym].vip++;
+      if (!statsRpcRes?.error && statsRpcRes?.data?.counts) {
+        const rpcData = statsRpcRes.data;
+        counts = {
+          ...rpcData.counts,
+          pendingDuplicateReviews: rpcData.counts.pendingDuplicateReviews ?? dupCountRes.count ?? 0,
+        };
+        countryStats = rpcData.countryStats || {};
+        categoryCounts = rpcData.categoryCounts || {};
+        monthBuckets = rpcData.monthBuckets || {};
+      } else {
+        const { data: metaRows } = await supabase
+          .from('swedpersiska_ads')
+          .select('category, country, status, is_featured, promotion_expires_at, cleanup_warning_sent_at, deleted_at, views_count, created_at');
+
+        countryStats = {
+          se: { total: 0, active: 0, vip: 0, views: 0 },
+          no: { total: 0, active: 0, vip: 0, views: 0 },
+          dk: { total: 0, active: 0, vip: 0, views: 0 },
+          fi: { total: 0, active: 0, vip: 0, views: 0 },
+          de: { total: 0, active: 0, vip: 0, views: 0 },
+          at: { total: 0, active: 0, vip: 0, views: 0 },
+          nl: { total: 0, active: 0, vip: 0, views: 0 },
+          fr: { total: 0, active: 0, vip: 0, views: 0 },
+        };
+        categoryCounts = {};
+        monthBuckets = {};
+        let totalCount = 0;
+        let activeCount = 0;
+        let pendingCount = 0;
+        let vipCount = 0;
+        let softDeletedCount = 0;
+        let warnedCount = 0;
+        let totalViews = 0;
+        const nowMs = Date.now();
+
+        (metaRows || []).forEach((row) => {
+          if (row.deleted_at || row.status === 'deleted') {
+            softDeletedCount++;
+            return;
           }
-        }
-      });
+          totalCount++;
+          const c = row.country || 'se';
+          if (!countryStats[c]) countryStats[c] = { total: 0, active: 0, vip: 0, views: 0 };
+          countryStats[c].total++;
+          if (row.status === 'active') {
+            activeCount++;
+            countryStats[c].active++;
+          } else if (row.status === 'pending') {
+            pendingCount++;
+          }
+          if (row.cleanup_warning_sent_at) {
+            warnedCount++;
+          }
+          const isVipActive = Boolean(row.is_featured && (!row.promotion_expires_at || Date.parse(row.promotion_expires_at) > nowMs));
+          if (isVipActive) {
+            vipCount++;
+            countryStats[c].vip++;
+          }
+          countryStats[c].views += row.views_count || 1;
+          totalViews += row.views_count || 1;
+          if (row.category) {
+            categoryCounts[row.category] = (categoryCounts[row.category] || 0) + 1;
+          }
+          if (row.created_at) {
+            const ym = String(row.created_at).slice(0, 7);
+            if (/^\d{4}-\d{2}$/.test(ym)) {
+              if (!monthBuckets[ym]) monthBuckets[ym] = { total: 0, vip: 0 };
+              monthBuckets[ym].total++;
+              if (isVipActive) monthBuckets[ym].vip++;
+            }
+          }
+        });
+
+        counts = {
+          total: totalCount,
+          active: activeCount,
+          pending: pendingCount,
+          vip: vipCount,
+          softDeleted: softDeletedCount,
+          warnedAds: warnedCount,
+          pendingDuplicateReviews: dupCountRes.count || 0,
+          totalViews,
+        };
+      }
 
       const firstPageAds = await attachAdminPins(firstPageRes.data || []);
 
@@ -428,16 +488,7 @@ export default async function handler(req, res) {
           stripeKeyMode,
           hasStripeWebhookSecret: Boolean(stripeWebhookSec),
         },
-        counts: {
-          total: totalCount,
-          active: activeCount,
-          pending: pendingCount,
-          vip: vipCount,
-          softDeleted: softDeletedCount,
-          warnedAds: warnedCount,
-          pendingDuplicateReviews: dupCountRes.count || 0,
-          totalViews
-        },
+        counts,
         openReports: openReportsRes.data || [],
         countryStats,
         categoryCounts,
@@ -476,14 +527,15 @@ export default async function handler(req, res) {
 
     if (action === 'active_ads') {
       const page = Math.max(1, Number(body.page || (req.query && req.query.page)) || 1);
+      const limit = Math.min(40, Math.max(10, Number(body.limit || (req.query && req.query.limit)) || PAGE_SIZE));
       const search = String(body.search || (req.query && req.query.search) || '').trim();
       const country = String(body.country || (req.query && req.query.country) || 'all');
       const category = String(body.category || (req.query && req.query.category) || 'all');
       const status = String(body.status || (req.query && req.query.status) || 'active');
       const vipOnly = Boolean(body.vipOnly || (req.query && req.query.vipOnly === 'true'));
 
-      const from = (page - 1) * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
+      const from = (page - 1) * limit;
+      const to = from + limit - 1;
 
       let q = supabase
         .from('swedpersiska_ads')
@@ -517,7 +569,8 @@ export default async function handler(req, res) {
       const { data, count, error } = await q;
       if (error) throw error;
       const enriched = await attachAdminPins(data || []);
-      return res.status(200).json({ ok: true, ads: enriched, count: count ?? 0, page });
+      const totalCount = count ?? 0;
+      return res.status(200).json({ ok: true, ads: enriched, count: totalCount, page, limit, hasMore: to + 1 < totalCount });
     }
 
     if (!HAS_SERVICE_ROLE && ['toggle_featured', 'update_status', 'update_country', 'delete_ad', 'dismiss_report', 'save_settings', 'save_cleanup_settings', 'resolve_duplicate_review', 'run_cleanup_now', 'update_website_subscription', 'generate_website_invoice_link', 'delete_website_subscription'].includes(action)) {
@@ -695,11 +748,11 @@ export default async function handler(req, res) {
       const fileBase64 = String(body.fileBase64 || '');
       const ext = BRANDING_MIME_TYPES[contentType];
       if (!ext) {
-        return res.status(400).json({ ok: false, error: 'فرمت فایل مجاز نیست (PNG, JPG, WebP, SVG, ICO).' });
+        return res.status(400).json({ ok: false, error: 'فرمت فایل مجاز نیست (PNG, JPG, WebP, AVIF, SVG, ICO).' });
       }
       const buf = Buffer.from(fileBase64, 'base64');
-      if (!buf.length || buf.length > 5242880) {
-        return res.status(400).json({ ok: false, error: 'حداکثر حجم فایل تصویر ۵ مگابایت است.' });
+      if (!buf.length || buf.length > MAX_BRANDING_BYTES) {
+        return res.status(400).json({ ok: false, error: 'حداکثر حجم هر تصویر ۱ مگابایت است.' });
       }
 
       let r2 = null;
@@ -728,6 +781,7 @@ export default async function handler(req, res) {
 
       const kind = String(body.kind || 'logo').replace(/[^a-z0-9_-]/gi, '').slice(0, 24) || 'logo';
       const objectKey = `branding/${kind}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+      const brandingCacheControl = 'public, max-age=31536000, immutable';
       const uploadUrl = createR2PresignedPutUrl({
         accountId: r2.accountId,
         accessKeyId: r2.accessKeyId,
@@ -735,11 +789,16 @@ export default async function handler(req, res) {
         bucketName: r2.bucketName,
         objectKey,
         contentType,
+        contentLength: buf.length,
+        cacheControl: brandingCacheControl,
       });
 
       const putRes = await fetch(uploadUrl, {
         method: 'PUT',
-        headers: { 'Content-Type': contentType },
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': brandingCacheControl,
+        },
         body: buf,
       });
 

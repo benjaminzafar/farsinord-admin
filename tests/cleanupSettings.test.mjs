@@ -4,6 +4,13 @@ import {
   validateCleanupSettings,
   DEFAULT_CLEANUP_SETTINGS,
 } from '../api/_lib/cleanupSettingsValidation.js';
+import {
+  MAX_IMAGE_BYTES,
+  DEFAULT_TARGET_BYTES,
+  computeScaledDimensions,
+  chooseBestCompressedCandidate,
+  compressImageForUpload,
+} from '../src/lib/imageCompressor.js';
 
 // Set a test service-role env var before loading admin.js so HAS_SERVICE_ROLE matches server config;
 // validation (400) and auth (401) assertions return before any Supabase network call is issued.
@@ -13,6 +20,7 @@ const {
   default: adminHandler,
   createAdminToken,
   verifyAdminToken,
+  MAX_BRANDING_BYTES,
 } = await import('../api/admin.js');
 
 function createMockRes() {
@@ -221,4 +229,51 @@ test('Admin API with valid admin token rejects invalid cleanup payloads with HTT
       assert.ok(state.body.error);
     }
   }
+});
+
+test('imageCompressor enforces strict 1 MB ceiling and scaling helpers behave deterministically', async () => {
+  assert.equal(MAX_IMAGE_BYTES, 1048576);
+  assert.equal(MAX_BRANDING_BYTES, 1048576);
+  assert.equal(DEFAULT_TARGET_BYTES, 280 * 1024);
+
+  assert.deepEqual(computeScaledDimensions(3840, 2160, 1920), { width: 1920, height: 1080 });
+  assert.deepEqual(computeScaledDimensions(800, 600, 1600), { width: 800, height: 600 });
+
+  const chosen = chooseBestCompressedCandidate([
+    { size: 1_300_000, width: 1920, height: 1080, quality: 0.9 },
+    { size: 240_000, width: 1920, height: 1080, quality: 0.8 },
+    { size: 160_000, width: 1280, height: 720, quality: 0.72 },
+  ]);
+  assert.equal(chosen.size, 240_000);
+
+  const badMime = new File(['abc'], 'notes.txt', { type: 'text/plain' });
+  await assert.rejects(() => compressImageForUpload(badMime), /فقط فایل‌های تصویری/);
+
+  const hugeSvg = new File([new Uint8Array(MAX_IMAGE_BYTES + 16)], 'logo.svg', { type: 'image/svg+xml' });
+  await assert.rejects(
+    () => compressImageForUpload(hugeSvg, { allowVectorPassthrough: true }),
+    /۱ مگابایت/
+  );
+});
+
+test('Admin API upload_branding_file rejects decoded images larger than 1 MB with HTTP 400', async () => {
+  const token = createAdminToken('swedpersiska@gmail.com');
+  const oversizedBase64 = Buffer.alloc(MAX_BRANDING_BYTES + 8, 1).toString('base64');
+  const { res, state } = createMockRes();
+  await adminHandler(
+    {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        action: 'upload_branding_file',
+        kind: 'logo',
+        contentType: 'image/webp',
+        fileBase64: oversizedBase64,
+      },
+    },
+    res
+  );
+  assert.equal(state.statusCode, 400);
+  assert.equal(state.body.ok, false);
+  assert.ok(state.body.error);
 });

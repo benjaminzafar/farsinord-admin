@@ -2,8 +2,6 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Layers, 
   Layers3,
-  ChevronLeft,
-  ChevronRight,
   SlidersHorizontal,
   LogOut, 
   Trash2, 
@@ -58,82 +56,10 @@ import AdCleanupSettingsSection from './AdCleanupSettingsSection';
 import { supabase } from '../lib/supabase';
 import { adminApi, getMainSiteUrl } from '../lib/apiClient';
 import { CATEGORIES, COUNTRIES, mergePortalCountries } from '../lib/translations';
+import { MAX_IMAGE_BYTES, compressImageForUpload } from '../lib/imageCompressor';
 
-// Architecture Constant: Maximum 10 records per view (Minimal Data Loading Rule)
-const PAGE_SIZE = 10;
-
-// Reusable Accessible Luxury Pagination Bar Component
-function PaginationBar({ currentPage, totalCount, pageSize, onPageChange, loading }) {
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-  const startItem = totalCount === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-  const endItem = Math.min(currentPage * pageSize, totalCount);
-
-  if (totalCount === 0) return null;
-
-  return (
-    <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3 bg-stone-50/80 border-t border-stone-200/80 gap-3 select-none">
-      <div className="text-xs text-stone-600 font-medium flex items-center gap-1.5">
-        <span>نمایش</span>
-        <span className="font-bold tabular-nums text-stone-900">{startItem}</span>
-        <span>تا</span>
-        <span className="font-bold tabular-nums text-stone-900">{endItem}</span>
-        <span>از</span>
-        <span className="font-bold tabular-nums text-blue-600">{totalCount}</span>
-        <span>رکورد</span>
-        {loading && <RefreshCw size={13} className="animate-spin text-blue-600 ms-1" />}
-      </div>
-
-      <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          disabled={currentPage <= 1 || loading}
-          onClick={() => onPageChange(currentPage - 1)}
-          className="h-8.5 px-3 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 disabled:opacity-40 disabled:pointer-events-none text-xs font-bold text-stone-700 flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-2xs"
-        >
-          <ChevronRight size={14} />
-          <span>قبلی</span>
-        </button>
-
-        <div className="flex items-center gap-1 px-1">
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => {
-            if (totalPages > 5 && Math.abs(p - currentPage) > 1 && p !== 1 && p !== totalPages) {
-              if (p === 2 || p === totalPages - 1) {
-                return <span key={p} className="text-stone-400 text-xs px-1">...</span>;
-              }
-              return null;
-            }
-            const isCurr = p === currentPage;
-            return (
-              <button
-                key={p}
-                type="button"
-                disabled={loading}
-                onClick={() => onPageChange(p)}
-                className={`h-8 min-w-8 px-2 rounded-lg text-xs tabular-nums font-bold transition-all active:scale-95 cursor-pointer ${
-                  isCurr
-                    ? 'bg-blue-600 text-white shadow-2xs'
-                    : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-100'
-                }`}
-              >
-                {p}
-              </button>
-            );
-          })}
-        </div>
-
-        <button
-          type="button"
-          disabled={currentPage >= totalPages || loading}
-          onClick={() => onPageChange(currentPage + 1)}
-          className="h-8.5 px-3 rounded-lg border border-stone-200 bg-white hover:bg-stone-100 disabled:opacity-40 disabled:pointer-events-none text-xs font-bold text-stone-700 flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-2xs"
-        >
-          <span>بعدی</span>
-          <ChevronLeft size={14} />
-        </button>
-      </div>
-    </div>
-  );
-}
+// Architecture Constant: 15 records per batch (Scroll-Triggered Incremental Loading)
+const ADMIN_LIST_LIMIT = 15;
 
 // Real vector SVG flags for all supported countries (flawless on Windows & all OS)
 const NORDIC_FLAGS = {
@@ -449,11 +375,17 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [activeChartIdx, setActiveChartIdx] = useState(null);
   const [recentActiveAds, setRecentActiveAds] = useState([]);
 
-  // Active Ads Tab State (10 records page size, database-paginated)
+  // Active Ads Tab State (15 records batch size, scroll-triggered pagination)
   const [activeAds, setActiveAds] = useState([]);
   const [activeTotalCount, setActiveTotalCount] = useState(0);
   const [activePage, setActivePage] = useState(1);
+  const [activeHasMore, setActiveHasMore] = useState(false);
   const [activeLoading, setActiveLoading] = useState(false);
+  const [activeLoadingMore, setActiveLoadingMore] = useState(false);
+  const adminAdsSentinelRef = useRef(null);
+  const adminLoadingMoreRef = useRef(false);
+  const adminAdsRequestSeqRef = useRef(0);
+  const loadMoreAdminAdsActionRef = useRef(null);
 
   // Filters for Active Ads
   const [searchQuery, setSearchQuery] = useState('');
@@ -783,11 +715,13 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         }
         applySettingsItems(apiRes.settings);
         if (isDefaultAdsView && Array.isArray(apiRes.initialActiveAds)) {
+          const totalActive = apiRes.counts?.active ?? apiRes.initialActiveAds.length;
           setActiveAds(apiRes.initialActiveAds);
-          setActiveTotalCount(apiRes.counts?.active ?? apiRes.initialActiveAds.length);
+          setActiveTotalCount(totalActive);
           setActivePage(1);
+          setActiveHasMore(apiRes.initialActiveAds.length < totalActive);
         } else {
-          await fetchActiveAds(activePage || 1, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
+          await fetchActiveAds(1, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
         }
         if (activeTab === 'lifecycle' || (activeTab === 'settings' && settingsSubTab === 'cleanup')) {
           await fetchLifecycleData(dupReviewFilter);
@@ -803,9 +737,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           .eq('status', 'active')
           .is('deleted_at', null)
           .order('is_featured', { ascending: false })
+          .order('sort_timestamp', { ascending: false })
           .order('created_at', { ascending: false })
           .order('id', { ascending: false })
-          .range(0, PAGE_SIZE - 1),
+          .range(0, ADMIN_LIST_LIMIT - 1),
         supabase.from('swedpersiska_ads').select('category, country, status, is_featured, views_count, created_at'),
         supabase.from('swedpersiska_settings').select('*')
       ]);
@@ -879,8 +814,9 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         setActiveAds(firstPageAds);
         setActiveTotalCount(act);
         setActivePage(1);
+        setActiveHasMore(firstPageAds.length < act);
       } else {
-        await fetchActiveAds(activePage || 1, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
+        await fetchActiveAds(1, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
       }
     } catch (err) {
       console.error('Error fetching admin data:', err);
@@ -901,29 +837,75 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }, 250);
   };
 
-  // 2. Fetch Ads with Server-side Pagination (10 records limit, deterministic ordering)
-  const fetchActiveAds = async (page = 1, search = searchQuery, country = countryFilter, cat = categoryFilter, status = adStatusFilter, vipOnly = vipOnlyFilter) => {
+  // 2. Fetch Ads with Server-side Incremental Pagination (15 records per scroll batch)
+  const fetchActiveAds = async (
+    page = 1,
+    search = searchQuery,
+    country = countryFilter,
+    cat = categoryFilter,
+    status = adStatusFilter,
+    vipOnly = vipOnlyFilter,
+    append = false
+  ) => {
     const safePage = Math.max(1, Number(page) || 1);
-    setActivePage(safePage);
-    setActiveLoading(true);
+    const reqSeq = append ? adminAdsRequestSeqRef.current : ++adminAdsRequestSeqRef.current;
+
+    if (append) {
+      if (adminLoadingMoreRef.current) return;
+      adminLoadingMoreRef.current = true;
+      setActiveLoadingMore(true);
+    } else {
+      adminLoadingMoreRef.current = false;
+      setActiveLoadingMore(false);
+      setActivePage(safePage);
+      setActiveLoading(true);
+    }
+
     try {
-      const apiRes = await adminApi.request('active_ads', { page: safePage, search, country, category: cat, status, vipOnly });
+      const apiRes = await adminApi.request('active_ads', {
+        page: safePage,
+        limit: ADMIN_LIST_LIMIT,
+        search,
+        country,
+        category: cat,
+        status,
+        vipOnly,
+      });
+      if (reqSeq !== adminAdsRequestSeqRef.current) return;
+
       if (apiRes && apiRes.ok) {
-        setActiveAds(apiRes.ads || []);
-        setActiveTotalCount(apiRes.count ?? 0);
+        const incoming = apiRes.ads || [];
+        const totalCount = apiRes.count ?? incoming.length;
+        setActiveAds((prev) => {
+          if (!append) return incoming;
+          const existingIds = new Set(prev.map((item) => item.id));
+          const uniqueNew = incoming.filter((item) => !existingIds.has(item.id));
+          return uniqueNew.length > 0 ? [...prev, ...uniqueNew] : prev;
+        });
+        setActiveTotalCount(totalCount);
         setActivePage(safePage);
+        setActiveHasMore(
+          typeof apiRes.hasMore === 'boolean'
+            ? apiRes.hasMore
+            : safePage * ADMIN_LIST_LIMIT < totalCount
+        );
         return;
       }
 
-      const from = (safePage - 1) * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
+      const from = (safePage - 1) * ADMIN_LIST_LIMIT;
+      const to = from + ADMIN_LIST_LIMIT - 1;
 
       let q = supabase
         .from('swedpersiska_ads')
         .select('*', { count: 'exact' });
 
-      if (status && status !== 'all') {
-        q = q.eq('status', status);
+      if (status === 'deleted') {
+        q = q.not('deleted_at', 'is', null);
+      } else {
+        q = q.is('deleted_at', null);
+        if (status && status !== 'all') {
+          q = q.eq('status', status);
+        }
       }
       if (vipOnly) {
         q = q.eq('is_featured', true);
@@ -936,7 +918,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         q = q.eq('category', cat);
       }
       if (search && search.trim()) {
-        const sanitized = search.trim().replace(/[,()]/g, ' ').trim();
+        const sanitized = search
+          .trim()
+          .replace(/[,()]/g, ' ')
+          .replace(/ي/g, 'ی')
+          .replace(/ك/g, 'ک')
+          .trim();
         if (sanitized) {
           const term = `%${sanitized}%`;
           q = q.or(`title.ilike.${term},description.ilike.${term},city.ilike.${term},reference_number.ilike.${term},contact_name.ilike.${term}`);
@@ -945,23 +932,74 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
       q = q
         .order('is_featured', { ascending: false })
+        .order('sort_timestamp', { ascending: false })
         .order('created_at', { ascending: false })
         .order('id', { ascending: false })
         .range(from, to);
 
       const { data, count, error } = await q;
+      if (reqSeq !== adminAdsRequestSeqRef.current) return;
       if (error) throw error;
 
-      setActiveAds(data || []);
-      setActiveTotalCount(count ?? 0);
+      const incoming = data || [];
+      const totalCount = count ?? incoming.length;
+      setActiveAds((prev) => {
+        if (!append) return incoming;
+        const existingIds = new Set(prev.map((item) => item.id));
+        const uniqueNew = incoming.filter((item) => !existingIds.has(item.id));
+        return uniqueNew.length > 0 ? [...prev, ...uniqueNew] : prev;
+      });
+      setActiveTotalCount(totalCount);
       setActivePage(safePage);
+      setActiveHasMore(to + 1 < totalCount);
     } catch (err) {
       console.error('Error fetching active ads:', err);
       triggerToast('خطا در بارگذاری صفحه آگهی‌ها: ' + (err.message || ''), 'error');
     } finally {
-      setActiveLoading(false);
+      if (append) {
+        adminLoadingMoreRef.current = false;
+        setActiveLoadingMore(false);
+      } else if (reqSeq === adminAdsRequestSeqRef.current) {
+        setActiveLoading(false);
+      }
     }
   };
+
+  const loadMoreAdminAds = () => {
+    if (!activeHasMore || activeLoading || adminLoadingMoreRef.current) return;
+    fetchActiveAds(
+      activePage + 1,
+      searchQuery,
+      countryFilter,
+      categoryFilter,
+      adStatusFilter,
+      vipOnlyFilter,
+      true
+    );
+  };
+
+  useEffect(() => {
+    loadMoreAdminAdsActionRef.current = loadMoreAdminAds;
+  });
+
+  useEffect(() => {
+    if (!isAuthenticated || activeTab !== 'ads' || !activeHasMore || activeLoading) return;
+    const node = adminAdsSentinelRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          loadMoreAdminAdsActionRef.current?.();
+        }
+      },
+      {
+        root: mainScrollRef.current || null,
+        rootMargin: '320px 0px',
+      }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [isAuthenticated, activeTab, activeHasMore, activeLoading, activeAds.length]);
 
   const assertAdminApiResponse = (apiRes, fallbackMsg) => {
     if (apiRes && (apiRes.status === 401 || apiRes.unauthorized)) {
@@ -1027,24 +1065,28 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
   const handleCountryHeroUpload = async (file, countryId) => {
     if (!file) return;
-    if (file.size > 5242880) {
-      alert('حجم تصویر نباید بیشتر از ۵ مگابایت باشد.');
-      return;
-    }
     setUploadingBrandKey(`country_${countryId}`);
     try {
+      const readyFile = await compressImageForUpload(file, {
+        maxBytes: MAX_IMAGE_BYTES,
+        targetBytes: 320 * 1024,
+        maxDimension: 1920,
+      });
+      if (readyFile.size > MAX_IMAGE_BYTES) {
+        throw new Error('حجم تصویر پس‌زمینه نباید بیشتر از ۱ مگابایت باشد.');
+      }
       const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ''));
         reader.onerror = reject;
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(readyFile);
       });
       const base64Part = dataUrl.includes(',') ? dataUrl.split(',')[1] : '';
       if (!base64Part) throw new Error('خطا در خواندن فایل تصویر.');
 
       const res = await adminApi.request('upload_branding_file', {
         kind: `country_${countryId}`,
-        contentType: file.type || 'image/jpeg',
+        contentType: readyFile.type || 'image/webp',
         fileBase64: base64Part,
       });
       if (!res || !res.ok || !res.publicUrl) {
@@ -1642,24 +1684,29 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   // Upload Logo or Favicon via Admin Server API to Cloudflare R2 (bypasses browser CORS)
   const handleBrandingFileUpload = async (file, kind) => {
     if (!file) return;
-    if (file.size > 1048576) {
-      triggerToast('حداکثر حجم مجاز برای لوگو یا آیکون ۱ مگابایت است.', 'error');
-      return;
-    }
     setUploadingBrandKey(kind);
     try {
+      const readyFile = await compressImageForUpload(file, {
+        maxBytes: MAX_IMAGE_BYTES,
+        targetBytes: 180 * 1024,
+        maxDimension: 800,
+        allowVectorPassthrough: true,
+      });
+      if (readyFile.size > MAX_IMAGE_BYTES) {
+        throw new Error('حجم هر تصویر باید حداکثر ۱ مگابایت باشد.');
+      }
       const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ''));
         reader.onerror = reject;
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(readyFile);
       });
       const base64Part = dataUrl.includes(',') ? dataUrl.split(',')[1] : '';
       if (!base64Part) throw new Error('خطا در خواندن فایل تصویر.');
 
       const res = await adminApi.request('upload_branding_file', {
         kind,
-        contentType: file.type || 'image/png',
+        contentType: readyFile.type || 'image/webp',
         fileBase64: base64Part,
       });
       if (!res || !res.ok || !res.publicUrl) {
@@ -3443,7 +3490,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                     <button
                       type="button"
-                      onClick={() => fetchActiveAds(activePage, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter)}
+                      onClick={() => fetchActiveAds(1, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter)}
                       className="h-10 px-3 rounded-xl border border-stone-200/80 bg-stone-50 hover:bg-white text-stone-700 text-xs font-semibold flex items-center gap-1.5 shadow-2xs active:scale-95 transition-all cursor-pointer shrink-0"
                       title="بروزرسانی جدول"
                     >
@@ -3476,7 +3523,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                         const countryObj = countriesList.find(c => c.id === (ad.country || 'se')) || countriesList[0];
                         const catObj = categoriesList.find(c => c.id === ad.category) || CATEGORIES.find(c => c.id === ad.category);
                         return (
-                          <div key={`m-${ad.id}`} className="p-3.5 space-y-3 hover:bg-blue-50/30 transition-colors">
+                          <div key={`m-${ad.id}`} className="admin-row-perf p-3.5 space-y-3 hover:bg-blue-50/30 transition-colors">
                             <div className="flex items-start gap-3">
                               <div
                                 onClick={() => setSelectedAdForModal(ad)}
@@ -3599,7 +3646,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                             <tr
                               key={ad.id}
                               id={`ad-item-${ad.id}`}
-                              className="hover:bg-blue-50/40 transition-colors group"
+                              className="admin-row-perf hover:bg-blue-50/40 transition-colors group"
                             >
                               {/* 1. Thumbnail */}
                               <td className="py-2.5 px-3 text-center align-middle">
@@ -3759,19 +3806,43 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   </>
                 )}
 
-                {/* Pagination Controls (Rule #3: 10 records per page) */}
-                <PaginationBar
-                  currentPage={activePage}
-                  totalCount={activeTotalCount}
-                  pageSize={PAGE_SIZE}
-                  onPageChange={(p) => {
-                    fetchActiveAds(p, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
-                    if (mainScrollRef.current) {
-                      mainScrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-                    }
-                  }}
-                  loading={activeLoading}
-                />
+                {/* Scroll-Triggered Infinite Pagination Footer */}
+                {activeAds.length > 0 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between px-4 py-3.5 bg-stone-50/80 border-t border-stone-200/80 gap-3 select-none">
+                    <div className="text-xs text-stone-600 font-medium flex items-center gap-1.5">
+                      <span>نمایش</span>
+                      <span className="font-bold tabular-nums text-stone-900">{activeAds.length}</span>
+                      <span>از</span>
+                      <span className="font-bold tabular-nums text-blue-600">{activeTotalCount || activeAds.length}</span>
+                      <span>آگهی</span>
+                      {(activeLoading || activeLoadingMore) && <RefreshCw size={13} className="animate-spin text-blue-600 ms-1" />}
+                    </div>
+
+                    {activeHasMore ? (
+                      <div ref={adminAdsSentinelRef} className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={activeLoadingMore}
+                          onClick={loadMoreAdminAds}
+                          className="h-9 px-4 rounded-xl border border-stone-200 bg-white hover:bg-stone-100 disabled:opacity-50 text-xs font-bold text-stone-700 flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer shadow-2xs"
+                        >
+                          {activeLoadingMore ? (
+                            <>
+                              <RefreshCw size={13} className="animate-spin text-blue-600" />
+                              <span>در حال بارگذاری...</span>
+                            </>
+                          ) : (
+                            <span>مشاهده آگهی‌های بیشتر</span>
+                          )}
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-[11px] font-semibold text-stone-400">
+                        همه آگهی‌ها نمایش داده شد
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
             </div>
