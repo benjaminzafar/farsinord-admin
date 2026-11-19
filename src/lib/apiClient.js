@@ -48,9 +48,46 @@ export const adminApi = {
     } catch {}
   },
 
+  async authBootstrap() {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin?action=auth_bootstrap`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        return await res.json();
+      }
+    } catch {}
+    return null;
+  },
+
+  async bootstrapSetup({ setupCode, email, password }) {
+    const res = await fetch(`${API_BASE}/api/admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'bootstrap_setup',
+        setupCode: String(setupCode || '').trim(),
+        email: String(email || '').trim().toLowerCase(),
+        password: String(password || ''),
+      }),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error('پاسخ نامعتبر از سرور مدیریت دریافت شد.');
+    }
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      throw new Error(json.error || 'خطا در راه‌اندازی اولیه حساب مدیریت.');
+    }
+    this.setToken(json.token);
+    return json;
+  },
+
   async login(email, password, turnstileToken = '') {
     const cleanEmail = String(email || '').trim().toLowerCase();
-    const cleanPass = String(password || '').trim();
+    const cleanPass = String(password || '');
 
     const res = await fetch(`${API_BASE}/api/admin`, {
       method: 'POST',
@@ -68,7 +105,9 @@ export const adminApi = {
     }
     const json = await res.json();
     if (!res.ok || !json.ok) {
-      throw new Error(json.error || 'ایمیل یا رمز عبور اشتباه است.');
+      const err = new Error(json.error || 'ایمیل یا رمز عبور اشتباه است.');
+      err.needsInitialSetup = Boolean(json.needsInitialSetup);
+      throw err;
     }
     this.setToken(json.token);
     return json;

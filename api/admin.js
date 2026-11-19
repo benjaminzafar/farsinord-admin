@@ -2,12 +2,35 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
 import { validateCleanupSettings, DEFAULT_CLEANUP_SETTINGS } from './_lib/cleanupSettingsValidation.js';
 import { notifyIndexNow, getIndexNowKey } from './_lib/indexNow.js';
+import {
+  DUMMY_SCRYPT_CREDENTIALS,
+  SecretVaultDecryptionError,
+  deleteVaultSecret,
+  getAdminJwtSigningContext,
+  getMasterIkm,
+  getVaultSecret,
+  hashAdminPassword,
+  invalidateSecretVaultCache,
+  isVaultTableMissingError,
+  listVaultSecretsStatus,
+  resolveCloudflareDeployConfig,
+  resolveR2VaultConfig,
+  resolveStripeSecretKey,
+  rewrapAllVaultSecrets,
+  rotateAdminJwtPepper,
+  safeTimingEqual,
+  saveVaultSecret,
+  sha256Hex,
+  verifyAdminPassword,
+} from './_lib/secretVault.js';
 
 const CANONICAL_ORIGIN = (process.env.SITE_CANONICAL_URL || 'https://www.linksho.eu').replace(/\/+$/, '');
 
 const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://bezbnymjcnmazdonfzky.supabase.co';
-const HAS_SERVICE_ROLE = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJlemJueW1qY25tYXpkb25memt5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ2OTM1NjksImV4cCI6MjExMDI2OTU2OX0.ylsHBAZ1zo1z_aKpHx7hgl-yZu2yt2puFNhR8jBm6S4';
+const SERVICE_ROLE_KEY = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const HAS_SERVICE_ROLE = Boolean(SERVICE_ROLE_KEY);
+// Fail closed on server: never silently downgrade admin client to anon key in production
+const supabaseKey = SERVICE_ROLE_KEY || 'missing-service-role-key';
 
 const ADMIN_FETCH_TIMEOUT_MS = 8000;
 function fetchWithTimeout(input, init = {}) {
@@ -17,16 +40,31 @@ function fetchWithTimeout(input, init = {}) {
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
   global: { fetch: fetchWithTimeout },
 });
 
 const PAGE_SIZE = 15;
 export const MAX_BRANDING_BYTES = 1048576; // Strict 1 MB limit per branding/hero image
 const EPHEMERAL_DEV_SECRET = crypto.randomBytes(32).toString('hex');
-const TOKEN_SECRET =
-  process.env.ADMIN_JWT_SECRET ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  (process.env.VERCEL_ENV === 'production' ? '' : EPHEMERAL_DEV_SECRET);
+
+function getFallbackJwtKey() {
+  const raw = String(
+    process.env.ADMIN_JWT_SECRET ||
+      getMasterIkm() ||
+      (process.env.VERCEL_ENV === 'production' ? '' : EPHEMERAL_DEV_SECRET)
+  ).trim();
+  if (!raw) return null;
+  return Buffer.from(
+    crypto.hkdfSync(
+      'sha256',
+      Buffer.from(raw, 'utf8'),
+      'linksho:v1:jwt-salt:bezbnymjcnmazdonfzky',
+      'linksho:v1:admin-jwt-base',
+      32
+    )
+  );
+}
 
 const ADMIN_AD_COLUMNS =
   'id, reference_number, title, title_fa, category, country, city, area, price, price_type, description, contact_name, contact_phone, contact_whatsapp, contact_telegram, contact_email, contact_website, images, is_featured, status, views_count, created_at, updated_at, last_boosted_at, last_meaningful_activity_at, sort_timestamp, next_free_boost_at, boost_count, duplicate_detection_status, duplicate_score, duplicate_of_ad_id, cleanup_warning_sent_at, scheduled_deletion_at, deleted_at, promotion_expires_at, is_disputed';
@@ -142,42 +180,17 @@ function createR2PresignedPutUrl({
   return `https://${host}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`;
 }
 
-const ADMIN_R2_CACHE_TTL_MS = 3 * 60 * 1000;
+const ADMIN_R2_CACHE_TTL_MS = 60 * 1000;
 let cachedAdminR2Config = null;
 let cachedAdminR2At = 0;
 
-async function resolveAdminR2Config() {
-  if (
-    process.env.R2_ACCOUNT_ID &&
-    process.env.R2_ACCESS_KEY_ID &&
-    process.env.R2_SECRET_ACCESS_KEY &&
-    process.env.R2_BUCKET_NAME &&
-    process.env.R2_PUBLIC_URL
-  ) {
-    return {
-      enabled: true,
-      accountId: process.env.R2_ACCOUNT_ID.trim(),
-      accessKeyId: process.env.R2_ACCESS_KEY_ID.trim(),
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY.trim(),
-      bucketName: process.env.R2_BUCKET_NAME.trim(),
-      publicUrl: process.env.R2_PUBLIC_URL.trim().replace(/\/+$/, ''),
-    };
-  }
+async function resolveAdminR2Config({ fresh = false } = {}) {
   const now = Date.now();
-  if (cachedAdminR2Config && now - cachedAdminR2At < ADMIN_R2_CACHE_TTL_MS) {
+  if (!fresh && cachedAdminR2Config && now - cachedAdminR2At < ADMIN_R2_CACHE_TTL_MS) {
     return cachedAdminR2Config;
   }
-  const { data } = await supabase.from('swedpersiska_settings').select('value').eq('key', 'r2_settings').maybeSingle();
-  const v = data?.value;
-  if (!v?.enabled || !v.accountId || !v.accessKeyId || !v.secretAccessKey || !v.bucketName || !v.publicUrl) return null;
-  const resolved = {
-    ...v,
-    accountId: String(v.accountId).trim(),
-    accessKeyId: String(v.accessKeyId).trim(),
-    secretAccessKey: String(v.secretAccessKey).trim(),
-    bucketName: String(v.bucketName).trim(),
-    publicUrl: String(v.publicUrl).trim().replace(/\/+$/, ''),
-  };
+  const resolved = await resolveR2VaultConfig(supabase, { fresh });
+  if (!resolved?.configured) return null;
   cachedAdminR2Config = resolved;
   cachedAdminR2At = now;
   return resolved;
@@ -283,13 +296,12 @@ async function attachAdminPins(ads = []) {
 }
 
 function safeEqual(a, b) {
-  const bufA = Buffer.from(String(a || ''), 'utf8');
-  const bufB = Buffer.from(String(b || ''), 'utf8');
-  if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
+  return safeTimingEqual(a, b);
 }
 
-export function createAdminToken(email) {
+export function createAdminToken(email, { signingKey = null, pepperVersion = 0, tokenVersion = 1 } = {}) {
+  const key = signingKey || getFallbackJwtKey();
+  if (!key) throw new Error('Missing JWT signing key');
   const cleanEmail = String(email || '').trim().toLowerCase();
   const displayName = cleanEmail.split('@')[0] || 'admin';
   const payload = Buffer.from(
@@ -297,25 +309,117 @@ export function createAdminToken(email) {
       sub: cleanEmail,
       name: displayName,
       role: 'admin',
-      exp: Date.now() + 24 * 60 * 60 * 1000
+      pv: Number(pepperVersion || 0),
+      ver: Number(tokenVersion || 1),
+      iat: Date.now(),
+      exp: Date.now() + 12 * 60 * 60 * 1000,
     })
   ).toString('base64url');
-  const sig = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('base64url');
+  const sig = crypto.createHmac('sha256', key).update(payload).digest('base64url');
   return `${payload}.${sig}`;
 }
 
-export function verifyAdminToken(token) {
-  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
-  const [payload, sig] = token.split('.');
-  const expectedSig = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('base64url');
+export function verifyAdminToken(token, { signingKey = null, expectedPepperVersion = null } = {}) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  const [payload, sig] = parts;
+  const key = signingKey || getFallbackJwtKey();
+  if (!key) return null;
+  const expectedSig = crypto.createHmac('sha256', key).update(payload).digest('base64url');
   if (!safeEqual(sig, expectedSig)) return null;
   try {
     const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (!decoded || decoded.role !== 'admin' || decoded.exp < Date.now()) return null;
+    if (!decoded || decoded.role !== 'admin' || !decoded.exp || decoded.exp < Date.now()) return null;
+    if (expectedPepperVersion !== null && Number(decoded.pv ?? 0) !== Number(expectedPepperVersion)) {
+      return null;
+    }
     return decoded;
   } catch {
     return null;
   }
+}
+
+async function createAdminTokenWithVault(email, { tokenVersion = 1 } = {}) {
+  const ctx = await getAdminJwtSigningContext(supabase, {
+    ensurePepper: HAS_SERVICE_ROLE,
+    adminEmail: email,
+  });
+  return createAdminToken(email, {
+    signingKey: ctx.signingKey,
+    pepperVersion: ctx.pepperVersion,
+    tokenVersion,
+  });
+}
+
+let cachedAdminVerMap = new Map(); // email -> { tokenVersion, isActive, expiresAt }
+const ADMIN_VER_CACHE_TTL_MS = 15_000;
+
+function invalidateAdminVersionCache(email = null) {
+  if (email) cachedAdminVerMap.delete(String(email).trim().toLowerCase());
+  else cachedAdminVerMap.clear();
+}
+
+async function verifyAdminTokenWithVault(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+
+  let unverified = null;
+  try {
+    unverified = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+
+  let ctx = await getAdminJwtSigningContext(supabase);
+  let decoded = verifyAdminToken(token, {
+    signingKey: ctx.signingKey,
+    expectedPepperVersion: ctx.hasDbPepper ? ctx.pepperVersion : null,
+  });
+
+  // Self-healing refresh if pepper version rotated on another isolate
+  if (!decoded && unverified && Number(unverified.pv ?? 0) !== Number(ctx.pepperVersion)) {
+    ctx = await getAdminJwtSigningContext(supabase, { fresh: true });
+    decoded = verifyAdminToken(token, {
+      signingKey: ctx.signingKey,
+      expectedPepperVersion: ctx.hasDbPepper ? ctx.pepperVersion : null,
+    });
+  }
+
+  if (!decoded) return null;
+
+  // Verify token_version against admin_credentials if DB admin account exists
+  const sub = String(decoded.sub || '').trim().toLowerCase();
+  if (sub && HAS_SERVICE_ROLE) {
+    const now = Date.now();
+    let verEntry = cachedAdminVerMap.get(sub);
+    if (!verEntry || now >= verEntry.expiresAt || Number(decoded.ver || 1) !== Number(verEntry.tokenVersion)) {
+      const { data: credRow, error: credErr } = await supabase
+        .from('admin_credentials')
+        .select('token_version, is_active')
+        .eq('email', sub)
+        .maybeSingle();
+      if (!credErr && credRow) {
+        verEntry = {
+          tokenVersion: Number(credRow.token_version || 1),
+          isActive: credRow.is_active !== false,
+          expiresAt: now + ADMIN_VER_CACHE_TTL_MS,
+        };
+        cachedAdminVerMap.set(sub, verEntry);
+      } else if (!credErr && !credRow) {
+        verEntry = { tokenVersion: null, isActive: true, expiresAt: now + ADMIN_VER_CACHE_TTL_MS };
+        cachedAdminVerMap.set(sub, verEntry);
+      }
+    }
+    if (verEntry && verEntry.tokenVersion !== null) {
+      if (!verEntry.isActive || Number(decoded.ver || 1) !== Number(verEntry.tokenVersion)) {
+        return null;
+      }
+    }
+  }
+
+  return decoded;
 }
 
 function resolveAdminIdentity(adminSession) {
@@ -410,85 +514,373 @@ export default async function handler(req, res) {
       : {};
     const action = body.action || (req.query && req.query.action);
 
-    // 1. Admin Login Endpoint (Unauthenticated -> Issues Signed Token)
+    // 0. Public Safe Auth Bootstrap Endpoint (GET ?action=auth_bootstrap)
+    //    Returns ONLY safe login-screen state (Turnstile siteKey, branding, initial setup status).
+    if (action === 'auth_bootstrap') {
+      const envAdminConfigured = Boolean(
+        String(process.env.ADMIN_EMAIL || '').trim() && String(process.env.ADMIN_PASSWORD || '').trim()
+      );
+      let vaultTableMissing = false;
+      let dbAdminCount = 0;
+      let hasActiveBootstrapToken = false;
+      let bootstrapPurpose = null;
+      let turnstile = null;
+      let branding = null;
+
+      if (HAS_SERVICE_ROLE) {
+        const [credRes, bootRes, settingsRes] = await Promise.all([
+          supabase.from('admin_credentials').select('email', { count: 'exact', head: true }).eq('is_active', true),
+          supabase
+            .from('admin_bootstrap_tokens')
+            .select('purpose, expires_at, used_at, failed_attempts')
+            .eq('singleton_id', 1)
+            .maybeSingle(),
+          supabase
+            .from('swedpersiska_settings')
+            .select('key, value')
+            .in('key', ['turnstile_settings', 'site_branding']),
+        ]);
+
+        if (credRes.error && isVaultTableMissingError(credRes.error)) {
+          vaultTableMissing = true;
+        } else if (!credRes.error) {
+          dbAdminCount = Number(credRes.count || 0);
+        }
+
+        if (!bootRes.error && bootRes.data) {
+          const b = bootRes.data;
+          const notUsed = !b.used_at;
+          const notExpired = b.expires_at && Date.parse(b.expires_at) > Date.now();
+          const underLimit = Number(b.failed_attempts || 0) < 5;
+          if (notUsed && notExpired && underLimit) {
+            hasActiveBootstrapToken = true;
+            bootstrapPurpose = b.purpose;
+          }
+        }
+
+        for (const row of settingsRes.data || []) {
+          if (row.key === 'turnstile_settings' && row.value && typeof row.value === 'object') {
+            turnstile = {
+              enabled: row.value.enabled !== false,
+              mode: row.value.mode === 'live' ? 'live' : 'test',
+              siteKey: String(row.value.siteKey || '').replace(/[\s\u200B-\u200D\uFEFF]/g, ''),
+              protectAdminLogin: row.value.protectAdminLogin !== false,
+            };
+          } else if (row.key === 'site_branding' && row.value && typeof row.value === 'object') {
+            const rawName = String(row.value.siteName || '').trim();
+            branding = {
+              siteName: rawName || 'لینک شو',
+              logoUrl: String(row.value.logoUrl || '').trim(),
+            };
+          }
+        }
+      }
+
+      const needsInitialSetup = HAS_SERVICE_ROLE && !vaultTableMissing && dbAdminCount === 0 && !envAdminConfigured;
+      return res.status(200).json({
+        ok: true,
+        hasServiceRole: HAS_SERVICE_ROLE,
+        vaultReady: HAS_SERVICE_ROLE && !vaultTableMissing,
+        vaultTableMissing,
+        needsInitialSetup,
+        hasActiveBootstrapToken,
+        bootstrapPurpose,
+        turnstile,
+        branding,
+      });
+    }
+
+    // 0b. Out-of-Band Single-Use Initial Admin Setup / Emergency Password Reset
+    //     Requires the 192-bit CSPRNG code printed ONLY in Supabase SQL Editor.
+    if (req.method === 'POST' && action === 'bootstrap_setup') {
+      if (!checkAdminLoginRateLimit(req)) {
+        return res.status(429).json({ ok: false, error: 'تعداد تلاش‌ها بیش از حد مجاز است. لطفاً ۱۵ دقیقه بعد تلاش کنید.' });
+      }
+      if (!HAS_SERVICE_ROLE) {
+        return res.status(503).json({
+          ok: false,
+          error: 'متغیر SUPABASE_SERVICE_ROLE_KEY روی سرور مدیریت تنظیم نشده است.',
+        });
+      }
+
+      const setupCode = String(body.setupCode || '').trim();
+      const email = String(body.email || '').trim().toLowerCase();
+      const password = String(body.password || '');
+
+      if (!setupCode || setupCode.length < 16) {
+        return res.status(400).json({ ok: false, error: 'کد راه‌اندازی یک‌بارمصرف را دقیقاً از خروجی SQL Editor کپی و وارد کنید.' });
+      }
+      if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 160) {
+        return res.status(400).json({ ok: false, error: 'فرمت ایمیل مدیریت معتبر نیست.' });
+      }
+      if (password.length < 10) {
+        return res.status(400).json({ ok: false, error: 'رمز عبور مدیر باید حداقل ۱۰ کاراکتر باشد.' });
+      }
+
+      const { data: bootRow, error: bootErr } = await supabase
+        .from('admin_bootstrap_tokens')
+        .select('token_hash, purpose, failed_attempts, expires_at, used_at')
+        .eq('singleton_id', 1)
+        .maybeSingle();
+
+      if (bootErr) {
+        if (isVaultTableMissingError(bootErr)) {
+          return res.status(503).json({
+            ok: false,
+            error: 'جدول‌های خزانه امنیتی هنوز در Supabase ساخته نشده‌اند. ابتدا فایل SQL مهاجرت را اجرا کنید.',
+          });
+        }
+        throw bootErr;
+      }
+
+      if (!bootRow || bootRow.used_at || !bootRow.expires_at || Date.parse(bootRow.expires_at) <= Date.now()) {
+        return res.status(403).json({
+          ok: false,
+          error: 'کد راه‌اندازی منقضی یا قبلاً استفاده شده است. فایل SQL را مجدداً در Supabase اجرا کنید تا کد جدید صادر شود.',
+        });
+      }
+
+      if (Number(bootRow.failed_attempts || 0) >= 5) {
+        return res.status(403).json({
+          ok: false,
+          error: 'کد راه‌اندازی به دلیل ۵ تلاش ناموفق باطل شد. لطفاً کد جدید در Supabase تولید کنید.',
+        });
+      }
+
+      const providedHash = sha256Hex(setupCode);
+      if (!safeEqual(providedHash, bootRow.token_hash)) {
+        const nextFails = Number(bootRow.failed_attempts || 0) + 1;
+        await supabase
+          .from('admin_bootstrap_tokens')
+          .update({
+            failed_attempts: nextFails,
+            used_at: nextFails >= 5 ? new Date().toISOString() : null,
+          })
+          .eq('singleton_id', 1);
+        return res.status(401).json({
+          ok: false,
+          error: `کد راه‌اندازی اشتباه است (${Math.max(0, 5 - nextFails)} تلاش باقی‌مانده).`,
+        });
+      }
+
+      // If purpose is initial_setup, enforce strictly that zero active DB admins exist
+      const { count: existingAdmins } = await supabase
+        .from('admin_credentials')
+        .select('email', { count: 'exact', head: true })
+        .eq('is_active', true);
+
+      if (bootRow.purpose === 'initial_setup' && Number(existingAdmins || 0) > 0) {
+        await supabase.from('admin_bootstrap_tokens').update({ used_at: new Date().toISOString() }).eq('singleton_id', 1);
+        return res.status(403).json({ ok: false, error: 'حساب مدیر قبلاً راه‌اندازی شده است.' });
+      }
+
+      // Atomically claim & burn the single-use bootstrap token FIRST
+      const nowIso = new Date().toISOString();
+      const { data: claimed, error: claimErr } = await supabase
+        .from('admin_bootstrap_tokens')
+        .update({ used_at: nowIso })
+        .eq('singleton_id', 1)
+        .is('used_at', null)
+        .select('singleton_id')
+        .maybeSingle();
+
+      if (claimErr || !claimed) {
+        return res.status(409).json({ ok: false, error: 'این کد قبلاً مصرف شده است.' });
+      }
+
+      const hashed = hashAdminPassword(password);
+      const { data: existingEmailRow } = await supabase
+        .from('admin_credentials')
+        .select('token_version')
+        .eq('email', email)
+        .maybeSingle();
+
+      const nextVer = existingEmailRow?.token_version ? Number(existingEmailRow.token_version) + 1 : 1;
+
+      const { error: upsertCredErr } = await supabase.from('admin_credentials').upsert(
+        {
+          email,
+          display_name: email.split('@')[0] || 'Admin',
+          password_hash: hashed.password_hash,
+          password_salt: hashed.password_salt,
+          hash_algorithm: hashed.hash_algorithm,
+          token_version: nextVer,
+          is_active: true,
+          failed_attempts: 0,
+          locked_until: null,
+          last_login_at: nowIso,
+          updated_by: email,
+        },
+        { onConflict: 'email' }
+      );
+      if (upsertCredErr) throw upsertCredErr;
+
+      // Rotate JWT pepper on password_reset so any prior stolen session dies immediately
+      if (bootRow.purpose === 'password_reset') {
+        await rotateAdminJwtPepper(supabase, email);
+      }
+      invalidateAdminVersionCache();
+
+      const token = await createAdminTokenWithVault(email, { tokenVersion: nextVer });
+      return res.status(200).json({ ok: true, token, email });
+    }
+
+    // 1. Admin Login Endpoint (Unauthenticated -> Issues HKDF + Pepper Signed Token)
     if (req.method === 'POST' && action === 'login') {
       if (!checkAdminLoginRateLimit(req)) {
         return res.status(429).json({ ok: false, error: 'تعداد تلاش‌های ورود بیش از حد مجاز است. لطفاً ۱۵ دقیقه دیگر دوباره امتحان کنید.' });
       }
-      if (!TOKEN_SECRET) {
-        return res.status(503).json({ ok: false, error: 'تنظیمات امنیتی سرور مدیریت (ADMIN_JWT_SECRET) تکمیل نشده است.' });
+      if (!HAS_SERVICE_ROLE && process.env.VERCEL_ENV === 'production') {
+        return res.status(503).json({
+          ok: false,
+          error: 'تنها متغیر ضروری سرور یعنی SUPABASE_SERVICE_ROLE_KEY در Vercel تنظیم نشده است.',
+        });
       }
 
-      const validEmail = String(process.env.ADMIN_EMAIL || '').toLowerCase().trim();
-      const validPass = String(process.env.ADMIN_PASSWORD || '').trim();
-      if (!validEmail || !validPass) {
-        return res.status(503).json({ ok: false, error: 'متغیرهای محیطی ADMIN_EMAIL و ADMIN_PASSWORD روی سرور مدیریت تنظیم نشده‌اند.' });
-      }
-
-      // Enforce server-side Turnstile verification (fail-closed) when live mode & secret key are configured
-      const turnstileSecret = String(process.env.TURNSTILE_SECRET_KEY || '').trim();
-      if (turnstileSecret) {
-        let requireTurnstile = true;
+      // Enforce fail-closed server-side Turnstile verification when live mode is active
+      let tsCfg = null;
+      if (HAS_SERVICE_ROLE) {
         try {
           const { data: tsRow } = await supabase
             .from('swedpersiska_settings')
             .select('value')
             .eq('key', 'turnstile_settings')
             .maybeSingle();
-          const tsCfg = tsRow?.value;
-          if (tsCfg && (tsCfg.enabled === false || tsCfg.protectAdminLogin === false || tsCfg.mode !== 'live')) {
-            requireTurnstile = false;
-          }
+          tsCfg = tsRow?.value || null;
         } catch {}
+      }
 
-        if (requireTurnstile) {
-          const cleanTs = String(body.turnstileToken || '').trim();
-          if (!cleanTs) {
-            return res.status(403).json({ ok: false, error: 'تایید امنیتی کپچا برای ورود مدیر الزامی است.' });
+      const requireTurnstile = Boolean(
+        tsCfg && tsCfg.enabled !== false && tsCfg.protectAdminLogin !== false && tsCfg.mode === 'live'
+      );
+
+      if (requireTurnstile) {
+        let turnstileSecret = '';
+        try {
+          const tsSecRes = await getVaultSecret(supabase, 'turnstile_secret_key');
+          turnstileSecret = String(tsSecRes?.value || '').trim();
+        } catch (err) {
+          console.error('[admin] turnstile vault error:', err?.message);
+          return res.status(503).json({ ok: false, error: 'خطا در رمزگشایی کلید کپچا از خزانه امنیتی.' });
+        }
+        if (!turnstileSecret) {
+          return res.status(503).json({
+            ok: false,
+            error: 'کپچای کلودفلر در حالت Live فعال است اما Secret Key آن تنظیم نشده است.',
+          });
+        }
+
+        const cleanTs = String(body.turnstileToken || '').trim();
+        if (!cleanTs) {
+          return res.status(403).json({ ok: false, error: 'تایید امنیتی کپچا برای ورود مدیر الزامی است.' });
+        }
+        const tsCtrl = new AbortController();
+        const tsTimer = setTimeout(() => tsCtrl.abort(), 6000);
+        try {
+          const verifyBody = new URLSearchParams({
+            secret: turnstileSecret,
+            response: cleanTs,
+            remoteip: getTrustedClientIp(req),
+          });
+          const tsRes = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+            method: 'POST',
+            body: verifyBody,
+            signal: tsCtrl.signal,
+          });
+          const tsJson = await tsRes.json().catch(() => ({}));
+          if (!tsRes.ok || !tsJson.success) {
+            return res.status(403).json({ ok: false, error: 'تایید امنیتی کپچا نامعتبر است. لطفاً مجدداً امتحان کنید.' });
           }
-          const tsCtrl = new AbortController();
-          const tsTimer = setTimeout(() => tsCtrl.abort(), 6000);
-          try {
-            const verifyBody = new URLSearchParams({
-              secret: turnstileSecret,
-              response: cleanTs,
-              remoteip: getTrustedClientIp(req),
-            });
-            const tsRes = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-              method: 'POST',
-              body: verifyBody,
-              signal: tsCtrl.signal,
-            });
-            const tsJson = await tsRes.json().catch(() => ({}));
-            if (!tsRes.ok || !tsJson.success) {
-              return res.status(403).json({ ok: false, error: 'تایید امنیتی کپچا نامعتبر است. لطفاً مجدداً امتحان کنید.' });
-            }
-          } catch {
-            return res.status(503).json({ ok: false, error: 'خطا در بررسی امنیتی کپچا. لطفاً لحظاتی بعد دوباره تلاش کنید.' });
-          } finally {
-            clearTimeout(tsTimer);
-          }
+        } catch {
+          return res.status(503).json({ ok: false, error: 'خطا در بررسی امنیتی کپچا. لطفاً لحظاتی بعد دوباره تلاش کنید.' });
+        } finally {
+          clearTimeout(tsTimer);
         }
       }
 
       const email = String(body.email || '').trim().toLowerCase();
-      const password = String(body.password || '').trim();
+      const password = String(body.password || '');
+
+      // Check DB-stored scrypt admin credentials first (zero Vercel env vars required!)
+      let dbAdminsExist = false;
+      let matchedDbAdmin = null;
+
+      if (HAS_SERVICE_ROLE) {
+        const { data: credRows, error: credErr } = await supabase
+          .from('admin_credentials')
+          .select('email, password_hash, password_salt, token_version, is_active, failed_attempts, locked_until')
+          .eq('is_active', true);
+
+        if (!credErr && Array.isArray(credRows) && credRows.length > 0) {
+          dbAdminsExist = true;
+          matchedDbAdmin = credRows.find((r) => safeEqual(email, String(r.email || '').toLowerCase())) || null;
+        }
+      }
+
+      if (dbAdminsExist) {
+        if (matchedDbAdmin?.locked_until && Date.parse(matchedDbAdmin.locked_until) > Date.now()) {
+          const minsLeft = Math.max(1, Math.ceil((Date.parse(matchedDbAdmin.locked_until) - Date.now()) / 60000));
+          return res.status(429).json({
+            ok: false,
+            error: `حساب به دلیل تلاش‌های ناموفق متعدد قفل شده است. لطفاً ${minsLeft} دقیقه دیگر امتحان کنید.`,
+          });
+        }
+
+        // Always execute scrypt (even for unknown email) to prevent timing-based email enumeration
+        const passOk = matchedDbAdmin
+          ? verifyAdminPassword(password, matchedDbAdmin.password_hash, matchedDbAdmin.password_salt)
+          : verifyAdminPassword(password, DUMMY_SCRYPT_CREDENTIALS.password_hash, DUMMY_SCRYPT_CREDENTIALS.password_salt) && false;
+
+        if (!matchedDbAdmin || !passOk) {
+          if (matchedDbAdmin) {
+            const nextFails = Number(matchedDbAdmin.failed_attempts || 0) + 1;
+            const lockedUntil = nextFails >= 5 ? new Date(Date.now() + 15 * 60 * 1000).toISOString() : null;
+            await supabase
+              .from('admin_credentials')
+              .update({ failed_attempts: nextFails, locked_until: lockedUntil })
+              .eq('email', matchedDbAdmin.email);
+          }
+          return res.status(401).json({ ok: false, error: 'ایمیل یا رمز عبور اشتباه است.' });
+        }
+
+        await supabase
+          .from('admin_credentials')
+          .update({ failed_attempts: 0, locked_until: null, last_login_at: new Date().toISOString() })
+          .eq('email', matchedDbAdmin.email);
+
+        const token = await createAdminTokenWithVault(matchedDbAdmin.email, {
+          tokenVersion: Number(matchedDbAdmin.token_version || 1),
+        });
+        return res.status(200).json({ ok: true, token, email: matchedDbAdmin.email, authSource: 'db' });
+      }
+
+      // Legacy fallback: Vercel env ADMIN_EMAIL & ADMIN_PASSWORD (allows smooth migration into DB)
+      const validEmail = String(process.env.ADMIN_EMAIL || '').toLowerCase().trim();
+      const validPass = String(process.env.ADMIN_PASSWORD || '').trim();
+      if (!validEmail || !validPass) {
+        return res.status(503).json({
+          ok: false,
+          needsInitialSetup: true,
+          error: 'حساب مدیر هنوز در دیتابیس راه‌اندازی نشده است. فایل SQL خزانه را در Supabase اجرا کرده و کد راه‌اندازی یک‌بارمصرف را وارد کنید.',
+        });
+      }
+
       const allowedEmails = validEmail.split(',').map((e) => e.trim()).filter(Boolean);
       const isEmailValid = allowedEmails.some((addr) => safeEqual(email, addr));
-      const isPassValid = safeEqual(password, validPass);
+      const isPassValid = safeEqual(password.trim(), validPass);
 
       if (!isEmailValid || !isPassValid) {
         return res.status(401).json({ ok: false, error: 'ایمیل یا رمز عبور اشتباه است.' });
       }
 
-      const token = createAdminToken(email);
-      return res.status(200).json({ ok: true, token, email });
+      const token = await createAdminTokenWithVault(email, { tokenVersion: 1 });
+      return res.status(200).json({ ok: true, token, email, authSource: 'env' });
     }
 
     // 2. Verify Admin Bearer Token for all protected actions
     const authHeader = req.headers.authorization || '';
     const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : (body.token || '');
-    const adminSession = verifyAdminToken(bearerToken);
+    const adminSession = await verifyAdminTokenWithVault(bearerToken);
 
     if (!adminSession) {
       return res.status(401).json({ ok: false, error: 'نشست مدیریتی منقضی شده یا نامعتبر است. لطفاً مجدداً وارد شوید.' });
@@ -614,22 +1006,59 @@ export default async function handler(req, res) {
 
       const firstPageAds = await attachAdminPins(firstPageRes.data || []);
 
-      const stripeSec = String(process.env.STRIPE_SECRET_KEY || '').trim();
-      const stripeWebhookSec = String(process.env.STRIPE_WEBHOOK_SECRET || '').trim();
-      const stripeKeyMode = /^sk_live_|^rk_live_/.test(stripeSec)
-        ? 'live'
-        : /^sk_test_|^rk_test_/.test(stripeSec)
-          ? 'test'
-          : 'none';
+      const [vaultStatus, dbAdminsRes] = await Promise.all([
+        listVaultSecretsStatus(supabase),
+        HAS_SERVICE_ROLE
+          ? supabase.from('admin_credentials').select('email, last_login_at, updated_at, token_version').eq('is_active', true)
+          : Promise.resolve({ data: null, error: null }),
+      ]);
+
+      const settingsList = settingsRes.data || [];
+      const stripeRowObj = settingsList.find((x) => x.key === 'stripe_settings')?.value || {};
+      const activeStripeMode = stripeRowObj.mode === 'live' ? 'live' : 'test';
+      const activeStripeSecretMeta =
+        vaultStatus.secrets[activeStripeMode === 'live' ? 'stripe_secret_key_live' : 'stripe_secret_key_test'];
+      const activeWebhookMeta =
+        vaultStatus.secrets[activeStripeMode === 'live' ? 'stripe_webhook_secret_live' : 'stripe_webhook_secret_test'];
+      const liveStripeMeta = vaultStatus.secrets.stripe_secret_key_live;
+      const testStripeMeta = vaultStatus.secrets.stripe_secret_key_test;
+
+      const stripeKeyMode = activeStripeSecretMeta?.configured
+        ? activeStripeMode
+        : liveStripeMeta?.configured
+          ? 'live'
+          : testStripeMeta?.configured
+            ? 'test'
+            : 'none';
+
+      const r2RowObj = settingsList.find((x) => x.key === 'r2_settings')?.value || {};
+      const cfRowObj = settingsList.find((x) => x.key === 'cloudflare_deploy_settings')?.value || {};
+      const legacyPlaintextSources = [];
+      if (r2RowObj.accessKeyId || r2RowObj.secretAccessKey) legacyPlaintextSources.push('r2_settings');
+      if (cfRowObj.apiToken) legacyPlaintextSources.push('cloudflare_deploy_settings');
+
+      const dbAdmins = !dbAdminsRes?.error && Array.isArray(dbAdminsRes?.data) ? dbAdminsRes.data : [];
+      const currentAdminIdentity = resolveAdminIdentity(adminSession);
 
       return res.status(200).json({
         ok: true,
         hasServiceRole: HAS_SERVICE_ROLE,
+        vaultStatus,
+        adminAuthInfo: {
+          email: currentAdminIdentity.email,
+          source: dbAdmins.length > 0 ? 'db' : 'env',
+          dbAdminCount: dbAdmins.length,
+          envAdminConfigured: Boolean(process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD),
+          hasLegacyPlaintextSecrets: legacyPlaintextSources.length > 0,
+          legacyPlaintextSources,
+        },
         serverEnvStatus: {
           hasServiceRole: HAS_SERVICE_ROLE,
-          hasStripeSecretKey: Boolean(stripeSec),
+          hasStripeSecretKey: Boolean(activeStripeSecretMeta?.configured || liveStripeMeta?.configured || testStripeMeta?.configured),
           stripeKeyMode,
-          hasStripeWebhookSecret: Boolean(stripeWebhookSec),
+          stripeSecretSource: activeStripeSecretMeta?.source || 'none',
+          hasStripeWebhookSecret: Boolean(activeWebhookMeta?.configured),
+          stripeWebhookSource: activeWebhookMeta?.source || 'none',
         },
         counts,
         openReports: openReportsRes.data || [],
@@ -638,14 +1067,14 @@ export default async function handler(req, res) {
         monthBuckets,
         recentActiveAds: firstPageAds.slice(0, 5),
         initialActiveAds: firstPageAds,
-        settings: (settingsRes.data || []).map((item) => {
+        settings: settingsList.map((item) => {
           if (item.key === 'cloudflare_deploy_settings' && item.value && typeof item.value === 'object') {
             return {
               ...item,
               value: {
                 accountId: item.value.accountId || '',
                 deployUrl: item.value.deployUrl || 'https://linksho-seller.vercel.app/api/cloudflare/deploy',
-                hasToken: Boolean(item.value.apiToken),
+                hasToken: Boolean(vaultStatus.secrets.cloudflare_api_token?.configured || item.value.apiToken),
               }
             };
           }
@@ -657,7 +1086,10 @@ export default async function handler(req, res) {
                 accountId: item.value.accountId || '',
                 bucketName: item.value.bucketName || '',
                 publicUrl: item.value.publicUrl || '',
-                hasCredentials: Boolean(item.value.accessKeyId && item.value.secretAccessKey),
+                hasCredentials: Boolean(
+                  (vaultStatus.secrets.r2_access_key_id?.configured && vaultStatus.secrets.r2_secret_access_key?.configured) ||
+                    (item.value.accessKeyId && item.value.secretAccessKey)
+                ),
                 accessKeyId: '',
                 secretAccessKey: ''
               }
@@ -665,6 +1097,267 @@ export default async function handler(req, res) {
           }
           return item;
         })
+      });
+    }
+
+    // 3b. Encrypted Secret Vault Management Actions
+    if (action === 'save_secret') {
+      const { secretKey, value } = body;
+      const { email: adminEmail } = resolveAdminIdentity(adminSession);
+      const saved = await saveVaultSecret(supabase, String(secretKey || '').trim(), value, adminEmail);
+      if (!saved.ok) {
+        return res.status(saved.status || 400).json({ ok: false, error: saved.error });
+      }
+      if (secretKey === 'r2_access_key_id' || secretKey === 'r2_secret_access_key') {
+        cachedAdminR2Config = null;
+        cachedAdminR2At = 0;
+      }
+      const vaultStatus = await listVaultSecretsStatus(supabase);
+      return res.status(200).json({ ok: true, secret: saved.secret, vaultStatus });
+    }
+
+    if (action === 'delete_secret') {
+      const { secretKey } = body;
+      const { email: adminEmail } = resolveAdminIdentity(adminSession);
+      const deleted = await deleteVaultSecret(supabase, String(secretKey || '').trim(), adminEmail);
+      if (!deleted.ok) {
+        return res.status(deleted.status || 400).json({ ok: false, error: deleted.error });
+      }
+      if (secretKey === 'r2_access_key_id' || secretKey === 'r2_secret_access_key') {
+        cachedAdminR2Config = null;
+        cachedAdminR2At = 0;
+      }
+      const vaultStatus = await listVaultSecretsStatus(supabase);
+      return res.status(200).json({ ok: true, vaultStatus });
+    }
+
+    if (action === 'rewrap_all_secrets') {
+      const { email: adminEmail } = resolveAdminIdentity(adminSession);
+      const result = await rewrapAllVaultSecrets(supabase, adminEmail);
+      if (!result.ok) {
+        return res.status(result.status || 400).json({ ok: false, error: result.error });
+      }
+      const vaultStatus = await listVaultSecretsStatus(supabase);
+      return res.status(200).json({ ok: true, ...result, vaultStatus });
+    }
+
+    if (action === 'migrate_legacy_secrets') {
+      const { email: adminEmail } = resolveAdminIdentity(adminSession);
+      const migrated = [];
+
+      const { data: legacyRows } = await supabase
+        .from('swedpersiska_settings')
+        .select('key, value')
+        .in('key', ['r2_settings', 'cloudflare_deploy_settings']);
+
+      for (const row of legacyRows || []) {
+        const v = row?.value;
+        if (!v || typeof v !== 'object') continue;
+
+        if (row.key === 'r2_settings') {
+          let r2Migrated = false;
+          if (v.accessKeyId) {
+            const r1 = await saveVaultSecret(supabase, 'r2_access_key_id', v.accessKeyId, adminEmail, { auditAction: 'migrate' });
+            if (!r1.ok) return res.status(r1.status || 400).json({ ok: false, error: r1.error });
+            migrated.push('r2_access_key_id');
+            r2Migrated = true;
+          }
+          if (v.secretAccessKey) {
+            const r2 = await saveVaultSecret(supabase, 'r2_secret_access_key', v.secretAccessKey, adminEmail, { auditAction: 'migrate' });
+            if (!r2.ok) return res.status(r2.status || 400).json({ ok: false, error: r2.error });
+            migrated.push('r2_secret_access_key');
+            r2Migrated = true;
+          }
+          if (r2Migrated) {
+            const cleanR2 = {
+              enabled: Boolean(v.enabled),
+              accountId: String(v.accountId || '').trim(),
+              bucketName: String(v.bucketName || '').trim(),
+              publicUrl: String(v.publicUrl || '').trim().replace(/\/+$/, ''),
+            };
+            await supabase
+              .from('swedpersiska_settings')
+              .upsert({ key: 'r2_settings', value: cleanR2, updated_at: new Date().toISOString() });
+          }
+        }
+
+        if (row.key === 'cloudflare_deploy_settings' && v.apiToken) {
+          const cfRes = await saveVaultSecret(supabase, 'cloudflare_api_token', v.apiToken, adminEmail, { auditAction: 'migrate' });
+          if (!cfRes.ok) return res.status(cfRes.status || 400).json({ ok: false, error: cfRes.error });
+          migrated.push('cloudflare_api_token');
+          const cleanCf = {
+            accountId: String(v.accountId || '').trim(),
+            deployUrl: String(v.deployUrl || 'https://linksho-seller.vercel.app/api/cloudflare/deploy').trim(),
+          };
+          await supabase
+            .from('swedpersiska_settings')
+            .upsert({ key: 'cloudflare_deploy_settings', value: cleanCf, updated_at: new Date().toISOString() });
+        }
+      }
+
+      cachedAdminR2Config = null;
+      cachedAdminR2At = 0;
+      const vaultStatus = await listVaultSecretsStatus(supabase);
+      return res.status(200).json({ ok: true, migrated, vaultStatus });
+    }
+
+    if (action === 'test_stripe_connection') {
+      const requestedMode = body.mode === 'live' ? 'live' : 'test';
+      let resolved;
+      try {
+        resolved = await resolveStripeSecretKey(supabase, requestedMode, { fresh: true });
+      } catch (err) {
+        if (err instanceof SecretVaultDecryptionError) {
+          return res.status(503).json({ ok: false, error: 'خطا در رمزگشایی کلید Stripe از خزانه امنیتی.' });
+        }
+        throw err;
+      }
+      const secretKey = String(resolved?.value || '').trim();
+      if (!secretKey) {
+        return res.status(400).json({
+          ok: false,
+          error: `کلید محرمانه Stripe برای حالت ${requestedMode === 'live' ? 'عملیاتی (Live)' : 'آزمایشی (Test)'} هنوز ذخیره نشده است.`,
+        });
+      }
+      const expectPrefix = requestedMode === 'live' ? /^(sk|rk)_live_/ : /^(sk|rk)_test_/;
+      if (!expectPrefix.test(secretKey)) {
+        return res.status(400).json({
+          ok: false,
+          error: `کلید فعلی با حالت ${requestedMode === 'live' ? 'Live' : 'Test'} همخوانی ندارد.`,
+        });
+      }
+
+      const stripeRes = await fetch('https://api.stripe.com/v1/balance', {
+        headers: { Authorization: `Bearer ${secretKey}` },
+      });
+      const stripeJson = await stripeRes.json().catch(() => ({}));
+      if (!stripeRes.ok) {
+        return res.status(401).json({
+          ok: false,
+          error: stripeJson?.error?.message || 'کلید Stripe توسط سرور استرایپ رد شد.',
+        });
+      }
+      return res.status(200).json({
+        ok: true,
+        livemode: Boolean(stripeJson.livemode),
+        source: resolved.source,
+        masked: resolved.masked,
+      });
+    }
+
+    if (action === 'update_admin_credentials') {
+      if (!HAS_SERVICE_ROLE) {
+        return res.status(503).json({ ok: false, error: 'SUPABASE_SERVICE_ROLE_KEY روی سرور تنظیم نشده است.' });
+      }
+      const { email: currentEmail } = resolveAdminIdentity(adminSession);
+      const currentPassword = String(body.currentPassword || '');
+      const newEmail = String(body.newEmail || currentEmail).trim().toLowerCase();
+      const newPassword = String(body.newPassword || '');
+
+      if (!currentPassword) {
+        return res.status(400).json({ ok: false, error: 'وارد کردن رمز عبور فعلی برای تایید هویت الزامی است.' });
+      }
+      if (!newEmail || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(newEmail) || newEmail.length > 160) {
+        return res.status(400).json({ ok: false, error: 'فرمت ایمیل جدید مدیر معتبر نیست.' });
+      }
+      if (newPassword && newPassword.length < 10) {
+        return res.status(400).json({ ok: false, error: 'رمز عبور جدید باید حداقل ۱۰ کاراکتر باشد.' });
+      }
+
+      const { data: existingCred, error: selErr } = await supabase
+        .from('admin_credentials')
+        .select('email, password_hash, password_salt, token_version')
+        .eq('email', currentEmail)
+        .maybeSingle();
+
+      if (selErr) {
+        if (isVaultTableMissingError(selErr)) {
+          return res.status(503).json({
+            ok: false,
+            error: 'جدول admin_credentials هنوز در Supabase ایجاد نشده است. ابتدا فایل SQL مهاجرت را اجرا کنید.',
+          });
+        }
+        throw selErr;
+      }
+
+      if (existingCred) {
+        if (!verifyAdminPassword(currentPassword, existingCred.password_hash, existingCred.password_salt)) {
+          return res.status(401).json({ ok: false, error: 'رمز عبور فعلی اشتباه است.' });
+        }
+      } else {
+        // Migrating from Vercel Env ADMIN_EMAIL / ADMIN_PASSWORD into DB
+        const envPass = String(process.env.ADMIN_PASSWORD || '').trim();
+        if (!envPass || !safeEqual(currentPassword.trim(), envPass)) {
+          return res.status(401).json({ ok: false, error: 'رمز عبور فعلی اشتباه است.' });
+        }
+      }
+
+      const effectivePass = newPassword || currentPassword;
+      if (effectivePass.length < 10) {
+        return res.status(400).json({
+          ok: false,
+          error: 'برای انتقال به دیتابیس امن، یک رمز عبور جدید با حداقل ۱۰ کاراکتر وارد کنید.',
+        });
+      }
+
+      const hashed = hashAdminPassword(effectivePass);
+      const nextVer = existingCred ? Number(existingCred.token_version || 1) + 1 : 1;
+      const nowIso = new Date().toISOString();
+
+      if (existingCred && newEmail !== currentEmail) {
+        await supabase.from('admin_credentials').delete().eq('email', currentEmail);
+      }
+
+      const { error: upsertErr } = await supabase.from('admin_credentials').upsert(
+        {
+          email: newEmail,
+          display_name: newEmail.split('@')[0] || 'Admin',
+          password_hash: hashed.password_hash,
+          password_salt: hashed.password_salt,
+          hash_algorithm: hashed.hash_algorithm,
+          token_version: nextVer,
+          is_active: true,
+          failed_attempts: 0,
+          locked_until: null,
+          last_login_at: nowIso,
+          updated_by: currentEmail,
+        },
+        { onConflict: 'email' }
+      );
+      if (upsertErr) throw upsertErr;
+
+      await rotateAdminJwtPepper(supabase, newEmail);
+      invalidateAdminVersionCache();
+
+      const freshToken = await createAdminTokenWithVault(newEmail, { tokenVersion: nextVer });
+      return res.status(200).json({ ok: true, token: freshToken, email: newEmail });
+    }
+
+    if (action === 'logout_all_sessions') {
+      const { email: currentEmail } = resolveAdminIdentity(adminSession);
+      const rotRes = await rotateAdminJwtPepper(supabase, currentEmail);
+      if (!rotRes.ok) {
+        return res.status(rotRes.status || 503).json({ ok: false, error: rotRes.error });
+      }
+      let nextVer = Number(adminSession.ver || 1);
+      const { data: cred } = await supabase
+        .from('admin_credentials')
+        .select('token_version')
+        .eq('email', currentEmail)
+        .maybeSingle();
+      if (cred) {
+        nextVer = Number(cred.token_version || 1) + 1;
+        await supabase
+          .from('admin_credentials')
+          .update({ token_version: nextVer, updated_by: currentEmail })
+          .eq('email', currentEmail);
+      }
+      invalidateAdminVersionCache();
+      const freshToken = await createAdminTokenWithVault(currentEmail, { tokenVersion: nextVer });
+      return res.status(200).json({
+        ok: true,
+        token: freshToken,
+        pepperVersion: rotRes.pepperVersion,
       });
     }
 
@@ -1009,10 +1702,28 @@ export default async function handler(req, res) {
         return res.status(result.status).json(result.body);
       }
       let nextValue = value;
+      const { email: adminEmail } = resolveAdminIdentity(adminSession);
       if (key === 'turnstile_settings' && value && typeof value === 'object' && !Array.isArray(value)) {
+        const incomingSecret = String(value.secretKey || '').trim();
+        if (incomingSecret) {
+          const savedTs = await saveVaultSecret(supabase, 'turnstile_secret_key', incomingSecret, adminEmail);
+          if (!savedTs.ok) {
+            return res.status(savedTs.status || 400).json({ ok: false, error: savedTs.error });
+          }
+        }
+        const targetMode = value.mode === 'live' ? 'live' : 'test';
+        if (targetMode === 'live' && value.enabled !== false) {
+          const tsSec = await getVaultSecret(supabase, 'turnstile_secret_key', { fresh: true });
+          if (!tsSec?.value) {
+            return res.status(400).json({
+              ok: false,
+              error: 'برای فعال‌سازی حالت واقعی (Live) کلودفلر Turnstile، ابتدا Secret Key را وارد و در خزانه ذخیره کنید.',
+            });
+          }
+        }
         nextValue = {
           enabled: value.enabled !== false,
-          mode: value.mode === 'live' ? 'live' : 'test',
+          mode: targetMode,
           siteKey: String(value.siteKey || '').replace(/[\s\u200B-\u200D\uFEFF]/g, '').slice(0, 64),
           protectAdminLogin: value.protectAdminLogin !== false,
           protectPostAd: value.protectPostAd !== false,
@@ -1089,6 +1800,19 @@ export default async function handler(req, res) {
         };
       }
       if (key === 'cloudflare_deploy_settings' && value && typeof value === 'object') {
+        const incomingToken = String(value.apiToken || '').trim();
+        let savedToVault = false;
+        if (incomingToken) {
+          const cfSave = await saveVaultSecret(supabase, 'cloudflare_api_token', incomingToken, adminEmail);
+          if (!cfSave.ok) {
+            return res.status(cfSave.status || 400).json({ ok: false, error: cfSave.error });
+          }
+          savedToVault = true;
+        }
+        // Check if vault already has the token so we can stop retaining plaintext in swedpersiska_settings
+        const existingVaultCf = savedToVault
+          ? { value: 'ok' }
+          : await getVaultSecret(supabase, 'cloudflare_api_token', { allowEnvFallback: false });
         const { data: existingCf } = await supabase
           .from('swedpersiska_settings')
           .select('value')
@@ -1098,24 +1822,50 @@ export default async function handler(req, res) {
         nextValue = {
           accountId: String(value.accountId || '').trim(),
           deployUrl: String(value.deployUrl || 'https://linksho-seller.vercel.app/api/cloudflare/deploy').trim(),
-          apiToken: (value.apiToken && String(value.apiToken).trim()) || prevCf.apiToken || '',
+          ...(existingVaultCf?.value ? {} : prevCf.apiToken ? { apiToken: prevCf.apiToken } : {}),
         };
       }
       if (key === 'r2_settings' && value && typeof value === 'object') {
+        const incomingAccessKey = String(value.accessKeyId || '').trim();
+        const incomingSecretKey = String(value.secretAccessKey || '').trim();
+
+        if (incomingAccessKey) {
+          const r1 = await saveVaultSecret(supabase, 'r2_access_key_id', incomingAccessKey, adminEmail);
+          if (!r1.ok) {
+            return res.status(r1.status || 400).json({ ok: false, error: r1.error });
+          }
+        }
+        if (incomingSecretKey) {
+          const r2 = await saveVaultSecret(supabase, 'r2_secret_access_key', incomingSecretKey, adminEmail);
+          if (!r2.ok) {
+            return res.status(r2.status || 400).json({ ok: false, error: r2.error });
+          }
+        }
+
+        const [vaultAk, vaultSk] = await Promise.all([
+          getVaultSecret(supabase, 'r2_access_key_id', { fresh: true, allowEnvFallback: false }),
+          getVaultSecret(supabase, 'r2_secret_access_key', { fresh: true, allowEnvFallback: false }),
+        ]);
+
         const { data: existingRow } = await supabase
           .from('swedpersiska_settings')
           .select('value')
           .eq('key', 'r2_settings')
           .maybeSingle();
         const prev = (existingRow && existingRow.value) || {};
+
+        // Never write plaintext keys into swedpersiska_settings once stored in encrypted vault
         nextValue = {
           enabled: Boolean(value.enabled),
           accountId: String(value.accountId || '').trim(),
           bucketName: String(value.bucketName || '').trim(),
           publicUrl: String(value.publicUrl || '').trim().replace(/\/+$/, ''),
-          accessKeyId: String(value.accessKeyId || '').trim() || prev.accessKeyId || '',
-          secretAccessKey: String(value.secretAccessKey || '').trim() || prev.secretAccessKey || ''
+          ...(vaultAk?.value ? {} : prev.accessKeyId ? { accessKeyId: prev.accessKeyId } : {}),
+          ...(vaultSk?.value ? {} : prev.secretAccessKey ? { secretAccessKey: prev.secretAccessKey } : {}),
         };
+        cachedAdminR2Config = null;
+        cachedAdminR2At = 0;
+        invalidateSecretVaultCache();
       }
       const { error } = await supabase.from('swedpersiska_settings').upsert({
         key,
@@ -1123,17 +1873,15 @@ export default async function handler(req, res) {
         updated_at: new Date().toISOString()
       });
       if (error) throw error;
-      return res.status(200).json({ ok: true });
+      const vaultStatus = ['turnstile_settings', 'stripe_settings', 'r2_settings', 'cloudflare_deploy_settings'].includes(key)
+        ? await listVaultSecretsStatus(supabase)
+        : undefined;
+      return res.status(200).json({ ok: true, ...(vaultStatus ? { vaultStatus } : {}) });
     }
 
     if (action === 'test_cloudflare_connection') {
-      const { data: cfRow } = await supabase
-        .from('swedpersiska_settings')
-        .select('value')
-        .eq('key', 'cloudflare_deploy_settings')
-        .maybeSingle();
-      const cfCfg = (cfRow && cfRow.value) || {};
-      const cfToken = String(body.apiToken || cfCfg.apiToken || process.env.CLOUDFLARE_API_TOKEN || '').trim();
+      const cfCfg = await resolveCloudflareDeployConfig(supabase, { fresh: true });
+      const cfToken = String(body.apiToken || cfCfg.apiToken || '').trim();
       if (!cfToken) {
         return res.status(400).json({ ok: false, error: 'ابتدا توکن کلودفلر را وارد و ذخیره کنید.' });
       }
@@ -1150,7 +1898,7 @@ export default async function handler(req, res) {
         });
       }
 
-      let accountId = String(body.accountId || cfCfg.accountId || process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+      let accountId = String(body.accountId || cfCfg.accountId || '').trim();
       let accountName = '';
 
       if (!accountId) {
@@ -1197,14 +1945,9 @@ export default async function handler(req, res) {
         return res.status(400).json({ ok: false, error: 'Missing workerName' });
       }
 
-      const { data: cfRow } = await supabase
-        .from('swedpersiska_settings')
-        .select('value')
-        .eq('key', 'cloudflare_deploy_settings')
-        .maybeSingle();
-      const cfCfg = (cfRow && cfRow.value) || {};
-      const cfToken = String(cfCfg.apiToken || process.env.CLOUDFLARE_API_TOKEN || '').trim();
-      let accountId = String(cfCfg.accountId || process.env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+      const cfCfg = await resolveCloudflareDeployConfig(supabase);
+      const cfToken = cfCfg.apiToken;
+      let accountId = cfCfg.accountId;
 
       if (cfToken) {
         if (!accountId) {
@@ -1420,7 +2163,14 @@ export default async function handler(req, res) {
       }
 
       const current = prevList[idx];
-      const secretKey = String(process.env.STRIPE_SECRET_KEY || '').trim();
+      const { data: stripeSettingRow } = await supabase
+        .from('swedpersiska_settings')
+        .select('value')
+        .eq('key', 'stripe_settings')
+        .maybeSingle();
+      const activeStripeMode = stripeSettingRow?.value?.mode === 'live' ? 'live' : 'test';
+      const resolvedStripeSec = await resolveStripeSecretKey(supabase, activeStripeMode, { fresh: true });
+      const secretKey = String(resolvedStripeSec?.value || '').trim();
       let invoiceUrl = current.stripeInvoiceLink || `${CANONICAL_ORIGIN}/?page=website-builder`;
       let isStripeLive = false;
 

@@ -54,6 +54,7 @@ import {
 } from 'lucide-react';
 import CloudflareTurnstile from './CloudflareTurnstile';
 import AdCleanupSettingsSection from './AdCleanupSettingsSection';
+import SecretKeyField from './SecretKeyField';
 import { adminApi, getMainSiteUrl } from '../lib/apiClient';
 import { CATEGORIES, COUNTRIES, mergePortalCountries } from '../lib/translations';
 import { MAX_IMAGE_BYTES, compressImageForUpload } from '../lib/imageCompressor';
@@ -196,12 +197,51 @@ const DEFAULT_CATEGORIES = [
 export default function AdminPanel({ onClose, onRefreshAds }) {
   // Authentication with signed token session persistence
   const [isAuthenticated, setIsAuthenticated] = useState(() => Boolean(adminApi.getToken()));
-  const [adminEmailInput, setAdminEmailInput] = useState('swedpersiska@gmail.com');
+  const [adminEmailInput, setAdminEmailInput] = useState('');
   const [adminPassInput, setAdminPassInput] = useState('');
   const [showAdminPass, setShowAdminPass] = useState(false);
   const [loginSubmitting, setLoginSubmitting] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Zero-Vercel-Env Auth Bootstrap & Encrypted Secret Vault State
+  const [authBootstrapInfo, setAuthBootstrapInfo] = useState(null);
+  const [setupMode, setSetupMode] = useState(false);
+  const [setupCodeInput, setSetupCodeInput] = useState('');
+  const [setupConfirmPass, setSetupConfirmPass] = useState('');
+  const [vaultStatus, setVaultStatus] = useState({
+    vaultReady: null,
+    vaultTableMissing: false,
+    activeKeyId: '',
+    hasMasterKeyOverride: false,
+    needsRewrapCount: 0,
+    jwtPepperVersion: 0,
+    jwtPepperUpdatedAt: null,
+    secrets: {},
+  });
+  const [adminAuthInfo, setAdminAuthInfo] = useState({
+    email: '',
+    source: 'env',
+    dbAdminCount: 0,
+    envAdminConfigured: false,
+    hasLegacyPlaintextSecrets: false,
+    legacyPlaintextSources: [],
+  });
+  const [secretDrafts, setSecretDrafts] = useState({});
+  const [savingSecretKey, setSavingSecretKey] = useState('');
+  const [deletingSecretKey, setDeletingSecretKey] = useState('');
+  const [migratingSecrets, setMigratingSecrets] = useState(false);
+  const [rewrappingSecrets, setRewrappingSecrets] = useState(false);
+  const [testingStripe, setTestingStripe] = useState(false);
+  const [stripeTestResult, setStripeTestResult] = useState(null);
+  const [credForm, setCredForm] = useState({
+    currentPassword: '',
+    newEmail: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [savingCreds, setSavingCreds] = useState(false);
+  const [loggingOutAll, setLoggingOutAll] = useState(false);
 
   // Active view: 'overview' | 'ads' | 'categories' | 'settings' with URL & localStorage persistence
   const [settingsSubTab, setSettingsSubTab] = useState(() => {
@@ -365,12 +405,6 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     freeBoostCooldownDays: 7,
   });
   const [hasServiceRoleConfig, setHasServiceRoleConfig] = useState(true);
-  const [serverEnvStatus, setServerEnvStatus] = useState({
-    hasServiceRole: true,
-    hasStripeSecretKey: null,
-    stripeKeyMode: 'none',
-    hasStripeWebhookSecret: null,
-  });
   const [countryStats, setCountryStats] = useState({
     se: { total: 0, active: 0, vip: 0, views: 0 },
     no: { total: 0, active: 0, vip: 0, views: 0 },
@@ -727,8 +761,15 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       }
       if (apiRes && apiRes.ok) {
         setHasServiceRoleConfig(apiRes.hasServiceRole !== false);
-        if (apiRes.serverEnvStatus) {
-          setServerEnvStatus(apiRes.serverEnvStatus);
+        if (apiRes.vaultStatus) {
+          setVaultStatus(apiRes.vaultStatus);
+        }
+        if (apiRes.adminAuthInfo) {
+          setAdminAuthInfo(apiRes.adminAuthInfo);
+          setCredForm((prev) => ({
+            ...prev,
+            newEmail: prev.newEmail || apiRes.adminAuthInfo.email || '',
+          }));
         }
         setCounts(apiRes.counts);
         setCountryStats(apiRes.countryStats);
@@ -754,98 +795,11 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         return;
       }
 
-      // Fast 3-query parallel fallback (lazy-loads Supabase SDK only if API fallback is needed)
-      const sb = await getFallbackSupabase();
-      const [firstPageRes, metaRes, settingsRes] = await Promise.all([
-        sb
-          .from('swedpersiska_ads')
-          .select('*')
-          .eq('status', 'active')
-          .is('deleted_at', null)
-          .order('is_featured', { ascending: false })
-          .order('sort_timestamp', { ascending: false })
-          .order('created_at', { ascending: false })
-          .order('id', { ascending: false })
-          .range(0, ADMIN_LIST_LIMIT - 1),
-        sb.from('swedpersiska_ads').select('category, country, status, is_featured, views_count, created_at'),
-        sb.from('swedpersiska_settings').select('*')
-      ]);
-
-      // Compute all aggregates in a single memory pass
-      const cStats = {
-        se: { total: 0, active: 0, vip: 0, views: 0 },
-        no: { total: 0, active: 0, vip: 0, views: 0 },
-        dk: { total: 0, active: 0, vip: 0, views: 0 },
-        fi: { total: 0, active: 0, vip: 0, views: 0 },
-        de: { total: 0, active: 0, vip: 0, views: 0 },
-        at: { total: 0, active: 0, vip: 0, views: 0 },
-        nl: { total: 0, active: 0, vip: 0, views: 0 },
-        fr: { total: 0, active: 0, vip: 0, views: 0 }
-      };
-      const catCounts = {};
-      const mBuckets = {};
-      let tot = 0;
-      let act = 0;
-      let pend = 0;
-      let vip = 0;
-      let totalV = 0;
-
-      (metaRes.data || []).forEach(row => {
-        tot++;
-        const c = row.country || 'se';
-        if (!cStats[c]) cStats[c] = { total: 0, active: 0, vip: 0, views: 0 };
-        cStats[c].total++;
-        if (row.status === 'active') {
-          act++;
-          cStats[c].active++;
-        } else if (row.status === 'pending') {
-          pend++;
-        }
-        if (row.is_featured) {
-          vip++;
-          cStats[c].vip++;
-        }
-        cStats[c].views += (row.views_count || 1);
-        totalV += (row.views_count || 1);
-
-        if (row.category) {
-          catCounts[row.category] = (catCounts[row.category] || 0) + 1;
-        }
-        if (row.created_at) {
-          const ym = String(row.created_at).slice(0, 7);
-          if (/^\d{4}-\d{2}$/.test(ym)) {
-            if (!mBuckets[ym]) mBuckets[ym] = { total: 0, vip: 0 };
-            mBuckets[ym].total++;
-            if (row.is_featured) mBuckets[ym].vip++;
-          }
-        }
-      });
-
-      const firstPageAds = firstPageRes.data || [];
-
-      setCounts({
-        total: tot,
-        active: act,
-        pending: pend,
-        vip: vip,
-        totalViews: totalV
-      });
-      setCountryStats(cStats);
-      setCategoryCounts(catCounts);
-      setMonthBuckets(mBuckets);
-      setRecentActiveAds(firstPageAds.slice(0, 5));
-      applySettingsItems(settingsRes.data);
-
-      if (isDefaultAdsView) {
-        setActiveAds(firstPageAds);
-        setActiveTotalCount(act);
-        setActivePage(1);
-        setActiveHasMore(firstPageAds.length < act);
-      } else {
-        await fetchActiveAds(1, searchQuery, countryFilter, categoryFilter, adStatusFilter, vipOnlyFilter);
-      }
+      // Fail closed on admin overview: never fall back to public anon select('*') on settings
+      triggerToast(apiRes?.error || 'خطا در برقراری ارتباط با سرور مدیریت (/api/admin).', 'error');
     } catch (err) {
       console.error('Error fetching admin data:', err);
+      triggerToast('خطا در بارگذاری اطلاعات پنل مدیریت.', 'error');
     } finally {
       setLoading(false);
     }
@@ -1416,31 +1370,283 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     try {
       await adminApi.login(adminEmailInput, adminPassInput, adminTurnstileToken);
       setIsAuthenticated(true);
+      setAdminPassInput('');
       fetchAdminData();
     } catch (err) {
       setLoginError(err.message || 'ایمیل یا رمز عبور اشتباه است.');
+      if (err.needsInitialSetup) {
+        setSetupMode(true);
+      }
     } finally {
       setLoginSubmitting(false);
     }
   };
 
-  // Pre-fetch turnstile & branding settings on login screen so Turnstile toggle in DB is respected
+  // Out-of-Band Single-Use Initial Setup / Password Reset via SQL Code
+  const handleBootstrapSetup = async (e) => {
+    e.preventDefault();
+    setLoginError('');
+    if (!setupCodeInput.trim() || setupCodeInput.trim().length < 16) {
+      setLoginError('کد راه‌اندازی یک‌بارمصرف خروجی Supabase SQL Editor را وارد کنید.');
+      return;
+    }
+    if (!adminEmailInput.trim() || !adminEmailInput.includes('@')) {
+      setLoginError('ایمیل معتبر مدیر را وارد کنید.');
+      return;
+    }
+    if (adminPassInput.length < 10) {
+      setLoginError('رمز عبور مدیر باید حداقل ۱۰ کاراکتر باشد.');
+      return;
+    }
+    if (adminPassInput !== setupConfirmPass) {
+      setLoginError('رمز عبور و تکرار آن یکسان نیستند.');
+      return;
+    }
+
+    setLoginSubmitting(true);
+    try {
+      await adminApi.bootstrapSetup({
+        setupCode: setupCodeInput.trim(),
+        email: adminEmailInput.trim(),
+        password: adminPassInput,
+      });
+      setSetupCodeInput('');
+      setAdminPassInput('');
+      setSetupConfirmPass('');
+      setSetupMode(false);
+      setIsAuthenticated(true);
+      fetchAdminData();
+    } catch (err) {
+      setLoginError(err.message || 'خطا در راه‌اندازی حساب مدیریت.');
+    } finally {
+      setLoginSubmitting(false);
+    }
+  };
+
+  // Fetch safe public auth_bootstrap metadata from /api/admin (no direct anon DB query)
   useEffect(() => {
     if (isAuthenticated) return;
-    getFallbackSupabase()
-      .then((sb) =>
-        sb
-          .from('swedpersiska_settings')
-          .select('key, value')
-          .in('key', ['turnstile_settings', 'site_branding'])
-      )
-      .then(({ data }) => {
-        if (Array.isArray(data)) {
-          applySettingsItems(data);
+    let active = true;
+    adminApi
+      .authBootstrap()
+      .then((info) => {
+        if (!active || !info || !info.ok) return;
+        setAuthBootstrapInfo(info);
+        if (info.turnstile) {
+          setTurnstileSettings((prev) => ({
+            ...prev,
+            ...info.turnstile,
+            secretKey: '',
+          }));
+        }
+        if (info.branding) {
+          if (info.branding.siteName) setSiteName(info.branding.siteName);
+          if (info.branding.logoUrl) setLogoUrl(info.branding.logoUrl);
+        }
+        if (info.needsInitialSetup || info.bootstrapPurpose === 'password_reset') {
+          setSetupMode(true);
         }
       })
       .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, [isAuthenticated]);
+
+  // Client-side format validation for encrypted secret drafts
+  const validateSecretDraft = (secretKey, rawVal) => {
+    const v = String(rawVal || '').trim();
+    if (!v) return '';
+    if (secretKey === 'stripe_secret_key_live') {
+      if (v.startsWith('pk_')) return 'کلید عمومی (pk_) را اینجا وارد نکنید؛ باید با sk_live_ یا rk_live_ شروع شود.';
+      if (/^(sk|rk)_test_/.test(v)) return 'این کلید آزمایشی (Test) است؛ آن را در کادر حالت آزمایشی وارد کنید.';
+      if (!/^(sk|rk)_live_[A-Za-z0-9]{16,}$/.test(v)) return 'فرمت باید با sk_live_ یا rk_live_ شروع شود.';
+    } else if (secretKey === 'stripe_secret_key_test') {
+      if (v.startsWith('pk_')) return 'کلید عمومی (pk_) را اینجا وارد نکنید؛ باید با sk_test_ یا rk_test_ شروع شود.';
+      if (/^(sk|rk)_live_/.test(v)) return 'این کلید عملیاتی (Live) است؛ آن را در کادر حالت عملیاتی وارد کنید.';
+      if (!/^(sk|rk)_test_[A-Za-z0-9]{16,}$/.test(v)) return 'فرمت باید با sk_test_ یا rk_test_ شروع شود.';
+    } else if (secretKey === 'stripe_webhook_secret_live' || secretKey === 'stripe_webhook_secret_test') {
+      if (!/^whsec_[A-Za-z0-9]{16,}$/.test(v)) return 'کلید وب‌هوک باید با whsec_ شروع شود.';
+    } else if (secretKey === 'turnstile_secret_key') {
+      if (v.length < 28) return 'این مقدار شبیه Site Key است! Secret Key کلودفلر حداقل ۲۸ کاراکتر دارد.';
+      if (!/^[0-9A-Za-z_-]{28,96}$/.test(v)) return 'فرمت Secret Key کلودفلر نامعتبر است.';
+    } else if (secretKey === 'r2_access_key_id') {
+      if (!/^[A-Za-z0-9_-]{16,128}$/.test(v)) return 'Access Key ID باید حداقل ۱۶ کاراکتر مجاز باشد.';
+    } else if (secretKey === 'r2_secret_access_key') {
+      if (!/^[A-Za-z0-9+/=_-]{24,160}$/.test(v)) return 'Secret Access Key باید حداقل ۲۴ کاراکتر باشد.';
+    } else if (secretKey === 'cloudflare_api_token') {
+      if (!/^[A-Za-z0-9_-]{24,128}$/.test(v)) return 'توکن API کلودفلر باید حداقل ۲۴ کاراکتر باشد.';
+    } else if (secretKey === 'resend_api_key') {
+      if (!/^re_[A-Za-z0-9_]{16,}$/.test(v)) return 'کلید Resend باید با re_ شروع شود.';
+    } else if (secretKey === 'notification_from_email') {
+      if (!v.includes('@') || v.length < 5) return 'ایمیل فرستنده معتبر وارد کنید (مثال: LinkSho <noreply@linksho.eu>).';
+    } else if (secretKey === 'cron_secret') {
+      if (v.length < 24 || /\s/.test(v)) return 'کلید Cron باید حداقل ۲۴ کاراکتر و بدون فاصله باشد.';
+    }
+    return '';
+  };
+
+  const handleSaveVaultSecret = async (secretKey, rawVal) => {
+    const clean = String(rawVal || '').trim();
+    if (!clean) return false;
+    const errText = validateSecretDraft(secretKey, clean);
+    if (errText) {
+      triggerToast(errText, 'error');
+      return false;
+    }
+    setSavingSecretKey(secretKey);
+    try {
+      const apiRes = await adminApi.request('save_secret', { secretKey, value: clean });
+      assertAdminApiResponse(apiRes, 'خطا در رمزنگاری و ذخیره کلید امنیتی');
+      if (apiRes.vaultStatus) {
+        setVaultStatus(apiRes.vaultStatus);
+      }
+      setSecretDrafts((prev) => ({ ...prev, [secretKey]: '' }));
+      triggerToast(`کلید با رمزنگاری AES-256-GCM در دیتابیس ذخیره و ماسک شد (${apiRes.secret?.masked || '••••'})`, 'success');
+      return true;
+    } catch (err) {
+      triggerToast(err.message || 'خطا در ذخیره کلید امنیتی', 'error');
+      return false;
+    } finally {
+      setSavingSecretKey('');
+    }
+  };
+
+  const handleDeleteVaultSecret = async (secretKey, label) => {
+    if (!window.confirm(`آیا از حذف کلید «${label || secretKey}» از خزانه رمزنگاری‌شده مطمئن هستید؟`)) return;
+    setDeletingSecretKey(secretKey);
+    try {
+      const apiRes = await adminApi.request('delete_secret', { secretKey });
+      assertAdminApiResponse(apiRes, 'خطا در حذف کلید امنیتی');
+      if (apiRes.vaultStatus) {
+        setVaultStatus(apiRes.vaultStatus);
+      }
+      triggerToast('کلید با موفقیت از خزانه دیتابیس حذف شد.', 'success');
+    } catch (err) {
+      triggerToast(err.message || 'خطا در حذف کلید امنیتی', 'error');
+    } finally {
+      setDeletingSecretKey('');
+    }
+  };
+
+  const handleMigrateLegacySecrets = async () => {
+    setMigratingSecrets(true);
+    try {
+      const apiRes = await adminApi.request('migrate_legacy_secrets');
+      assertAdminApiResponse(apiRes, 'خطا در انتقال کلیدهای قدیمی به خزانه');
+      if (apiRes.vaultStatus) {
+        setVaultStatus(apiRes.vaultStatus);
+      }
+      setAdminAuthInfo((prev) => ({ ...prev, hasLegacyPlaintextSecrets: false, legacyPlaintextSources: [] }));
+      triggerToast(
+        apiRes.migrated?.length
+          ? `${apiRes.migrated.length} کلید قدیمی رمزنگاری و نسخه متنی آن‌ها پاکسازی شد.`
+          : 'هیچ کلید متن‌ساده قدیمی باقی نمانده است.',
+        'success'
+      );
+    } catch (err) {
+      triggerToast(err.message || 'خطا در انتقال کلیدها', 'error');
+    } finally {
+      setMigratingSecrets(false);
+    }
+  };
+
+  const handleRewrapVaultSecrets = async () => {
+    setRewrappingSecrets(true);
+    try {
+      const apiRes = await adminApi.request('rewrap_all_secrets');
+      assertAdminApiResponse(apiRes, 'خطا در بازرمزنگاری کلیدها');
+      if (apiRes.vaultStatus) {
+        setVaultStatus(apiRes.vaultStatus);
+      }
+      triggerToast(`${apiRes.rewrappedCount || 0} کلید با کلید اصلی جدید بازرمزنگاری شد.`, 'success');
+    } catch (err) {
+      triggerToast(err.message || 'خطا در بازرمزنگاری کلیدها', 'error');
+    } finally {
+      setRewrappingSecrets(false);
+    }
+  };
+
+  const handleTestStripeConnection = async () => {
+    setTestingStripe(true);
+    setStripeTestResult(null);
+    try {
+      const apiRes = await adminApi.request('test_stripe_connection', { mode: stripeSettings.mode });
+      assertAdminApiResponse(apiRes, 'خطا در تست اتصال Stripe');
+      const okMsg = `اتصال به Stripe تایید شد (${apiRes.livemode ? 'حالت واقعی Live' : 'حالت آزمایشی Test'} • منبع: ${apiRes.source === 'vault' ? 'خزانه رمزنگاری‌شده' : 'Vercel Env'}).`;
+      setStripeTestResult({ ok: true, text: okMsg });
+      triggerToast(okMsg, 'success');
+    } catch (err) {
+      const failMsg = err.message || 'اتصال به Stripe ناموفق بود.';
+      setStripeTestResult({ ok: false, text: failMsg });
+      triggerToast(failMsg, 'error');
+    } finally {
+      setTestingStripe(false);
+    }
+  };
+
+  const handleUpdateAdminCredentials = async (e) => {
+    e.preventDefault();
+    if (!credForm.currentPassword) {
+      triggerToast('رمز عبور فعلی را وارد کنید.', 'error');
+      return;
+    }
+    if (credForm.newPassword && credForm.newPassword.length < 10) {
+      triggerToast('رمز عبور جدید باید حداقل ۱۰ کاراکتر باشد.', 'error');
+      return;
+    }
+    if (credForm.newPassword && credForm.newPassword !== credForm.confirmPassword) {
+      triggerToast('رمز عبور جدید و تکرار آن یکسان نیستند.', 'error');
+      return;
+    }
+    setSavingCreds(true);
+    try {
+      const apiRes = await adminApi.request('update_admin_credentials', {
+        currentPassword: credForm.currentPassword,
+        newEmail: credForm.newEmail.trim(),
+        newPassword: credForm.newPassword,
+      });
+      assertAdminApiResponse(apiRes, 'خطا در بروزرسانی اطلاعات ورود مدیر');
+      if (apiRes.token) {
+        adminApi.setToken(apiRes.token);
+      }
+      setAdminAuthInfo((prev) => ({
+        ...prev,
+        email: apiRes.email || prev.email,
+        source: 'db',
+        dbAdminCount: Math.max(1, prev.dbAdminCount || 0),
+      }));
+      setCredForm({
+        currentPassword: '',
+        newEmail: apiRes.email || credForm.newEmail,
+        newPassword: '',
+        confirmPassword: '',
+      });
+      triggerToast('اطلاعات ورود مدیر با هش امن scrypt در دیتابیس ذخیره شد و سایر نشست‌ها باطل شدند.', 'success');
+    } catch (err) {
+      triggerToast(err.message || 'خطا در ذخیره اطلاعات ورود مدیر', 'error');
+    } finally {
+      setSavingCreds(false);
+    }
+  };
+
+  const handleLogoutAllSessions = async () => {
+    if (!window.confirm('تمامی نشست‌های فعال پنل مدیریت روی دستگاه‌های دیگر بلافاصله باطل می‌شوند. ادامه می‌دهید؟')) return;
+    setLoggingOutAll(true);
+    try {
+      const apiRes = await adminApi.request('logout_all_sessions');
+      assertAdminApiResponse(apiRes, 'خطا در چرخش کلید نشست‌ها');
+      if (apiRes.token) {
+        adminApi.setToken(apiRes.token);
+      }
+      setVaultStatus((prev) => ({ ...prev, jwtPepperVersion: apiRes.pepperVersion || prev.jwtPepperVersion + 1 }));
+      triggerToast('کلید امضای نشست‌ها چرخش یافت و سایر دستگاه‌ها خارج شدند.', 'success');
+    } catch (err) {
+      triggerToast(err.message || 'خطا در باطل کردن نشست‌ها', 'error');
+    } finally {
+      setLoggingOutAll(false);
+    }
+  };
 
   // Logout handler
   const handleLogout = () => {
@@ -1933,6 +2139,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       triggerToast('لطفاً شناسه حساب، نام سطل ذخیره‌سازی و آدرس عمومی دامنه تصاویر را وارد کنید.', 'error');
       return;
     }
+    const draftAccess = String(secretDrafts.r2_access_key_id || '').trim();
+    const draftSecret = String(secretDrafts.r2_secret_access_key || '').trim();
     setSavingSettings(true);
     try {
       const payload = {
@@ -1940,18 +2148,22 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         accountId: r2Settings.accountId.trim(),
         bucketName: r2Settings.bucketName.trim(),
         publicUrl: r2Settings.publicUrl.trim().replace(/\/+$/, ''),
-        accessKeyId: r2Settings.accessKeyId.trim(),
-        secretAccessKey: r2Settings.secretAccessKey.trim()
+        accessKeyId: draftAccess,
+        secretAccessKey: draftSecret
       };
       const apiRes = await adminApi.request('save_settings', { key: 'r2_settings', value: payload });
       assertAdminApiResponse(apiRes, 'خطا در ذخیره تنظیمات فضای ابری');
+      if (apiRes.vaultStatus) {
+        setVaultStatus(apiRes.vaultStatus);
+      }
+      setSecretDrafts((prev) => ({ ...prev, r2_access_key_id: '', r2_secret_access_key: '' }));
       setR2Settings(prev => ({
         ...prev,
-        hasCredentials: prev.hasCredentials || Boolean(payload.accessKeyId && payload.secretAccessKey),
+        hasCredentials: prev.hasCredentials || Boolean(draftAccess && draftSecret) || Boolean(apiRes.vaultStatus?.secrets?.r2_access_key_id?.configured && apiRes.vaultStatus?.secrets?.r2_secret_access_key?.configured),
         accessKeyId: '',
         secretAccessKey: ''
       }));
-      const msg = 'تنظیمات فضای ابری کلودفلر R2 با موفقیت ذخیره شد!';
+      const msg = 'تنظیمات فضای ابری کلودفلر R2 با موفقیت و با رمزنگاری امن ذخیره شد!';
       setSaveSuccessMsg(msg);
       triggerToast(msg, 'success');
       setTimeout(() => setSaveSuccessMsg(''), 3500);
@@ -1962,11 +2174,30 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   };
 
-  // Save Stripe & Monetization Settings (never persists secretKey/webhookSecret to public settings table)
+  // Save Stripe & Monetization Settings (public settings in swedpersiska_settings + any typed secret drafts into AES-256-GCM Vault)
   const saveStripeSettings = async (e) => {
     e.preventDefault();
     setSavingSettings(true);
     try {
+      // Save any typed Stripe secret drafts into encrypted vault first
+      const stripeSecretKeys = [
+        'stripe_secret_key_live',
+        'stripe_webhook_secret_live',
+        'stripe_secret_key_test',
+        'stripe_webhook_secret_test',
+      ];
+      let latestVault = vaultStatus;
+      for (const sk of stripeSecretKeys) {
+        const draft = String(secretDrafts[sk] || '').trim();
+        if (!draft) continue;
+        const errText = validateSecretDraft(sk, draft);
+        if (errText) throw new Error(errText);
+        const sRes = await adminApi.request('save_secret', { secretKey: sk, value: draft });
+        assertAdminApiResponse(sRes, 'خطا در رمزنگاری کلید Stripe');
+        if (sRes.vaultStatus) latestVault = sRes.vaultStatus;
+        setSecretDrafts((prev) => ({ ...prev, [sk]: '' }));
+      }
+
       const publicStripePayload = {
         enabled: stripeSettings.enabled,
         mode: stripeSettings.mode,
@@ -1978,7 +2209,11 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       };
       const apiRes = await adminApi.request('save_settings', { key: 'stripe_settings', value: publicStripePayload });
       assertAdminApiResponse(apiRes, 'خطا در ذخیره تنظیمات درگاه پرداخت');
-      const msg = 'تنظیمات درگاه پرداخت و تعرفه ویژه (VIP) با موفقیت ذخیره شد!';
+      const finalVault = apiRes.vaultStatus || latestVault;
+      if (finalVault) {
+        setVaultStatus(finalVault);
+      }
+      const msg = 'تنظیمات درگاه پرداخت، کلیدهای رمزنگاری‌شده و تعرفه ویژه (VIP) با موفقیت ذخیره شد!';
       setSaveSuccessMsg(msg);
       triggerToast(msg, 'success');
       setTimeout(() => setSaveSuccessMsg(''), 3500);
@@ -2284,10 +2519,18 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
     }
   };
 
-  // Save Cloudflare Turnstile Anti-Bot Settings (never persists secretKey to public settings table)
+  // Save Cloudflare Turnstile Anti-Bot Settings (public fields in swedpersiska_settings + secretKey encrypted in Vault)
   const saveTurnstileSettings = async (e) => {
     if (e) e.preventDefault();
     const cleanedSiteKey = String(turnstileSettings.siteKey || '').replace(/[\s\u200B-\u200D\uFEFF]/g, '');
+    const draftTurnstileSecret = String(secretDrafts.turnstile_secret_key || '').trim();
+    if (draftTurnstileSecret) {
+      const secErr = validateSecretDraft('turnstile_secret_key', draftTurnstileSecret);
+      if (secErr) {
+        triggerToast(secErr, 'error');
+        return;
+      }
+    }
     if (turnstileSettings.enabled && turnstileSettings.mode === 'live') {
       if (!cleanedSiteKey) {
         triggerToast('در حالت عملیاتی وارد کردن کلید عمومی (Site Key) کلودفلر الزامی است.', 'error');
@@ -2310,12 +2553,19 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         mode: turnstileSettings.mode,
         siteKey: cleanedSiteKey,
         protectAdminLogin: turnstileSettings.protectAdminLogin,
-        protectPostAd: turnstileSettings.protectPostAd
+        protectPostAd: turnstileSettings.protectPostAd,
       };
-      setTurnstileSettings(prev => ({ ...prev, siteKey: cleanedSiteKey }));
-      localStorage.setItem('swedpersiska_turnstile_settings', JSON.stringify(publicTurnstilePayload));
-      const apiRes = await adminApi.request('save_settings', { key: 'turnstile_settings', value: publicTurnstilePayload });
+      const apiPayload = draftTurnstileSecret
+        ? { ...publicTurnstilePayload, secretKey: draftTurnstileSecret }
+        : publicTurnstilePayload;
+      const apiRes = await adminApi.request('save_settings', { key: 'turnstile_settings', value: apiPayload });
       assertAdminApiResponse(apiRes, 'خطا در ذخیره تنظیمات آنتی‌بات');
+      if (apiRes.vaultStatus) {
+        setVaultStatus(apiRes.vaultStatus);
+      }
+      setSecretDrafts((prev) => ({ ...prev, turnstile_secret_key: '' }));
+      setTurnstileSettings(prev => ({ ...prev, siteKey: cleanedSiteKey, secretKey: '' }));
+      localStorage.setItem('swedpersiska_turnstile_settings', JSON.stringify(publicTurnstilePayload));
       const msg = 'تنظیمات امنیتی و آنتی‌بات کلودفلر با موفقیت ذخیره شد!';
       setSaveSuccessMsg(msg);
       triggerToast(msg, 'success');
@@ -2504,13 +2754,14 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   }, [stripeSettings.vipPrice, stripeSettings.currency, monthBuckets, countriesList, countryStats, revenueChartView, counts.vip]);
 
   // ========================================================
-  // LOGIN SCREEN - Apple Eye-Comfort Soft-White Focus Card
+  // LOGIN & ZERO-ENV INITIAL SETUP SCREEN
   // ========================================================
   if (!isAuthenticated) {
+    const isPasswordReset = authBootstrapInfo?.bootstrapPurpose === 'password_reset';
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#F5F5F7] font-vazir select-none" dir="rtl">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#F5F5F7] font-vazir select-none overflow-y-auto" dir="rtl">
         
-        <div className="relative w-full max-w-[400px] rounded-[28px] bg-[#FBFBFC] border border-[#E5E5EA] p-7 sm:p-8 shadow-[0_24px_70px_rgba(29,29,31,0.12)] space-y-6 z-10 animate-in zoom-in-95 duration-200 text-[#1D1D1F]">
+        <div className="relative w-full max-w-[430px] rounded-[28px] bg-[#FBFBFC] border border-[#E5E5EA] p-7 sm:p-8 shadow-[0_24px_70px_rgba(29,29,31,0.12)] space-y-5 z-10 animate-in zoom-in-95 duration-200 text-[#1D1D1F]">
           
           {/* Header */}
           <div className="text-center space-y-2.5">
@@ -2518,78 +2769,214 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               ل‌ش
             </div>
             <div>
-              <h2 className="text-lg font-black text-[#1D1D1F] tracking-tight">ورود به پنل مدیریت</h2>
-              <p className="text-xs text-[#6E6E73] font-medium mt-0.5">لینک شو — سامانه مدیریت نیازمندی‌ها</p>
+              <h2 className="text-lg font-black text-[#1D1D1F] tracking-tight">
+                {setupMode
+                  ? (isPasswordReset ? 'بازیابی امن رمز عبور مدیر' : 'راه‌اندازی اولیه حساب مدیریت')
+                  : 'ورود به پنل مدیریت'}
+              </h2>
+              <p className="text-xs text-[#6E6E73] font-medium mt-0.5">
+                {setupMode
+                  ? 'بدون نیاز به ثبت ایمیل و رمز عبور در متغیرهای Vercel'
+                  : 'لینک شو — سامانه مدیریت نیازمندی‌ها'}
+              </p>
             </div>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-4">
-            {loginError && (
-              <div className="rounded-2xl bg-rose-50 border border-rose-200 p-3 text-xs font-semibold text-rose-700 flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0" />
-                <span>{loginError}</span>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">ایمیل مدیریت</label>
-              <input
-                type="email"
-                required
-                placeholder="admin@swedpersiska.se"
-                value={adminEmailInput}
-                onChange={(e) => setAdminEmailInput(e.target.value)}
-                className="w-full rounded-2xl border border-[#D2D2D7] bg-[#F5F5F7] focus:bg-[#FBFBFC] px-3.5 py-2.5 text-xs text-[#1D1D1F] focus:border-[#0066CC] focus:outline-none transition-all font-mono text-left"
-                dir="ltr"
-              />
+          {authBootstrapInfo && authBootstrapInfo.hasServiceRole === false && (
+            <div className="rounded-2xl bg-rose-50 border border-rose-200 p-3.5 text-xs font-semibold text-rose-800 leading-relaxed">
+              تنها متغیر ضروری در Vercel یعنی <code className="font-mono bg-white px-1.5 py-0.5 rounded" dir="ltr">SUPABASE_SERVICE_ROLE_KEY</code> روی پروژه ادمین تنظیم نشده است. آن را در Vercel ثبت و Redeploy کنید.
             </div>
+          )}
 
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-bold text-[#1D1D1F]">رمز عبور</label>
-                <button
-                  type="button"
-                  onClick={() => setShowAdminPass((v) => !v)}
-                  className="text-[11px] font-semibold text-[#6E6E73] hover:text-[#1D1D1F] cursor-pointer"
-                >
-                  {showAdminPass ? 'مخفی کردن' : 'نمایش رمز'}
-                </button>
-              </div>
-              <input
-                type={showAdminPass ? 'text' : 'password'}
-                required
-                placeholder="••••••••"
-                value={adminPassInput}
-                onChange={(e) => setAdminPassInput(e.target.value)}
-                className="w-full rounded-2xl border border-[#D2D2D7] bg-[#F5F5F7] focus:bg-[#FBFBFC] px-3.5 py-2.5 text-xs text-[#1D1D1F] focus:border-[#0066CC] focus:outline-none transition-all font-mono text-left"
-                dir="ltr"
-              />
+          {authBootstrapInfo && authBootstrapInfo.hasServiceRole && authBootstrapInfo.vaultTableMissing && (
+            <div className="rounded-2xl bg-amber-50 border border-amber-200 p-3.5 text-[11.5px] font-medium text-amber-900 leading-relaxed space-y-1">
+              <p className="font-extrabold">گام اول (یک‌بار برای همیشه):</p>
+              <p>
+                فایل <code className="font-mono bg-white/80 px-1 py-0.5 rounded text-[10.5px]" dir="ltr">supabase_secret_vault_migration.sql</code> را در Supabase SQL Editor اجرا کنید تا خزانه رمزنگاری‌شده و کد راه‌اندازی یک‌بارمصرف ساخته شود.
+              </p>
             </div>
+          )}
 
-            {/* Cloudflare Turnstile Anti-Bot Verification */}
-            {turnstileSettings.enabled !== false && turnstileSettings.protectAdminLogin !== false && (
-              <div className="pt-1 flex flex-col items-center justify-center">
-                <CloudflareTurnstile
-                  theme="light"
-                  mode={turnstileSettings.mode}
-                  siteKey={turnstileSettings.siteKey}
-                  onVerify={(token) => {
-                    setAdminTurnstileToken(token);
-                    setLoginError('');
-                  }}
-                  onExpire={() => setAdminTurnstileToken('')}
+          {setupMode ? (
+            <form onSubmit={handleBootstrapSetup} className="space-y-3.5">
+              {loginError && (
+                <div className="rounded-2xl bg-rose-50 border border-rose-200 p-3 text-xs font-semibold text-rose-700 flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0" />
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              <div className="rounded-2xl bg-sky-50 border border-sky-200/80 p-3 text-[11px] text-sky-900 leading-relaxed">
+                کد یک‌بارمصرف خروجی اجرای SQL در <strong>Supabase SQL Editor</strong> (شروع با <code className="font-mono" dir="ltr">LS-SETUP-</code> یا <code className="font-mono" dir="ltr">LS-RESET-</code>) را وارد کنید تا ایمیل و رمز عبور با هش امن <code className="font-mono" dir="ltr">scrypt</code> در دیتابیس ذخیره شوند.
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">کد یک‌بارمصرف Supabase SQL</label>
+                <input
+                  type="text"
+                  required
+                  autoComplete="off"
+                  placeholder="LS-SETUP-..."
+                  value={setupCodeInput}
+                  onChange={(e) => setSetupCodeInput(e.target.value)}
+                  className="w-full rounded-2xl border border-[#D2D2D7] bg-[#F5F5F7] focus:bg-[#FBFBFC] px-3.5 py-2.5 text-xs text-[#1D1D1F] focus:border-[#0066CC] focus:outline-none transition-all font-mono text-left"
+                  dir="ltr"
                 />
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={loginSubmitting}
-              className="w-full h-11 rounded-full bg-[#0066CC] hover:bg-[#0055AA] disabled:opacity-60 text-white font-bold text-xs shadow-[0_6px_18px_rgba(0,102,204,0.24)] active:scale-[0.96] transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] cursor-pointer"
-            >
-              {loginSubmitting ? 'در حال ورود...' : 'ورود به پنل'}
-            </button>
-          </form>
+              <div>
+                <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">ایمیل مدیریت</label>
+                <input
+                  type="email"
+                  required
+                  placeholder="admin@linksho.eu"
+                  value={adminEmailInput}
+                  onChange={(e) => setAdminEmailInput(e.target.value)}
+                  className="w-full rounded-2xl border border-[#D2D2D7] bg-[#F5F5F7] focus:bg-[#FBFBFC] px-3.5 py-2.5 text-xs text-[#1D1D1F] focus:border-[#0066CC] focus:outline-none transition-all font-mono text-left"
+                  dir="ltr"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-[#1D1D1F]">رمز عبور جدید (حداقل ۱۰ کاراکتر)</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPass((v) => !v)}
+                    className="text-[11px] font-semibold text-[#6E6E73] hover:text-[#1D1D1F] cursor-pointer"
+                  >
+                    {showAdminPass ? 'مخفی کردن' : 'نمایش رمز'}
+                  </button>
+                </div>
+                <input
+                  type={showAdminPass ? 'text' : 'password'}
+                  required
+                  minLength={10}
+                  autoComplete="new-password"
+                  placeholder="حداقل ۱۰ کاراکتر قوی..."
+                  value={adminPassInput}
+                  onChange={(e) => setAdminPassInput(e.target.value)}
+                  className="w-full rounded-2xl border border-[#D2D2D7] bg-[#F5F5F7] focus:bg-[#FBFBFC] px-3.5 py-2.5 text-xs text-[#1D1D1F] focus:border-[#0066CC] focus:outline-none transition-all font-mono text-left"
+                  dir="ltr"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">تکرار رمز عبور</label>
+                <input
+                  type={showAdminPass ? 'text' : 'password'}
+                  required
+                  minLength={10}
+                  autoComplete="new-password"
+                  placeholder="••••••••••"
+                  value={setupConfirmPass}
+                  onChange={(e) => setSetupConfirmPass(e.target.value)}
+                  className="w-full rounded-2xl border border-[#D2D2D7] bg-[#F5F5F7] focus:bg-[#FBFBFC] px-3.5 py-2.5 text-xs text-[#1D1D1F] focus:border-[#0066CC] focus:outline-none transition-all font-mono text-left"
+                  dir="ltr"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loginSubmitting}
+                className="w-full h-11 rounded-full bg-[#0066CC] hover:bg-[#0055AA] disabled:opacity-60 text-white font-bold text-xs shadow-[0_6px_18px_rgba(0,102,204,0.24)] active:scale-[0.96] transition-all cursor-pointer"
+              >
+                {loginSubmitting ? 'در حال ثبت امن...' : (isPasswordReset ? 'ثبت رمز جدید و ورود' : 'ساخت حساب مدیر و ورود')}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSetupMode(false);
+                  setLoginError('');
+                }}
+                className="w-full text-center text-[11.5px] font-semibold text-[#0066CC] hover:underline cursor-pointer"
+              >
+                بازگشت به فرم ورود عادی
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleLogin} className="space-y-4">
+              {loginError && (
+                <div className="rounded-2xl bg-rose-50 border border-rose-200 p-3 text-xs font-semibold text-rose-700 flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0" />
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-[#1D1D1F] mb-1.5">ایمیل مدیریت</label>
+                <input
+                  type="email"
+                  required
+                  autoComplete="username"
+                  placeholder="admin@linksho.eu"
+                  value={adminEmailInput}
+                  onChange={(e) => setAdminEmailInput(e.target.value)}
+                  className="w-full rounded-2xl border border-[#D2D2D7] bg-[#F5F5F7] focus:bg-[#FBFBFC] px-3.5 py-2.5 text-xs text-[#1D1D1F] focus:border-[#0066CC] focus:outline-none transition-all font-mono text-left"
+                  dir="ltr"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-[#1D1D1F]">رمز عبور</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdminPass((v) => !v)}
+                    className="text-[11px] font-semibold text-[#6E6E73] hover:text-[#1D1D1F] cursor-pointer"
+                  >
+                    {showAdminPass ? 'مخفی کردن' : 'نمایش رمز'}
+                  </button>
+                </div>
+                <input
+                  type={showAdminPass ? 'text' : 'password'}
+                  required
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  value={adminPassInput}
+                  onChange={(e) => setAdminPassInput(e.target.value)}
+                  className="w-full rounded-2xl border border-[#D2D2D7] bg-[#F5F5F7] focus:bg-[#FBFBFC] px-3.5 py-2.5 text-xs text-[#1D1D1F] focus:border-[#0066CC] focus:outline-none transition-all font-mono text-left"
+                  dir="ltr"
+                />
+              </div>
+
+              {/* Cloudflare Turnstile Anti-Bot Verification */}
+              {turnstileSettings.enabled !== false && turnstileSettings.protectAdminLogin !== false && (
+                <div className="pt-1 flex flex-col items-center justify-center">
+                  <CloudflareTurnstile
+                    theme="light"
+                    mode={turnstileSettings.mode}
+                    siteKey={turnstileSettings.siteKey}
+                    onVerify={(token) => {
+                      setAdminTurnstileToken(token);
+                      setLoginError('');
+                    }}
+                    onExpire={() => setAdminTurnstileToken('')}
+                  />
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loginSubmitting}
+                className="w-full h-11 rounded-full bg-[#0066CC] hover:bg-[#0055AA] disabled:opacity-60 text-white font-bold text-xs shadow-[0_6px_18px_rgba(0,102,204,0.24)] active:scale-[0.96] transition-all duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] cursor-pointer"
+              >
+                {loginSubmitting ? 'در حال ورود...' : 'ورود به پنل'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSetupMode(true);
+                  setLoginError('');
+                }}
+                className="w-full text-center text-[11px] font-semibold text-[#6E6E73] hover:text-[#0066CC] transition-colors cursor-pointer"
+              >
+                راه‌اندازی اولیه یا بازیابی رمز با کد یک‌بارمصرف Supabase
+              </button>
+            </form>
+          )}
 
           <button
             type="button"
@@ -5915,69 +6302,132 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       />
                     </div>
 
-                    {/* Server Environment Security Status Card */}
-                    <div className="rounded-xl border border-stone-200/80 bg-stone-50 p-4 space-y-3">
+                    {/* Encrypted Secret Vault for Stripe Keys (AES-256-GCM — Zero extra Vercel Env needed) */}
+                    <div className="rounded-2xl border border-stone-200/80 bg-white p-4 sm:p-5 space-y-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <ShieldCheck size={16} className="text-slate-800 shrink-0" />
-                          <span className="text-xs font-extrabold text-zinc-900">وضعیت امنیتی کلیدهای محرمانه در سرور</span>
+                          <ShieldCheck size={16} className="text-emerald-600 shrink-0" />
+                          <span className="text-xs font-extrabold text-zinc-900">خزانه رمزنگاری‌شده کلیدهای Stripe (AES-256-GCM)</span>
                         </div>
-                        <span className="text-[10.5px] font-bold text-stone-500">
-                          ذخیره‌سازی امن فقط در Vercel Env
-                        </span>
+                        <button
+                          type="button"
+                          disabled={testingStripe}
+                          onClick={handleTestStripeConnection}
+                          className="h-8 px-3 rounded-lg border border-stone-200 bg-stone-50 hover:bg-stone-100 disabled:opacity-50 text-zinc-800 text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                        >
+                          <RefreshCw size={12} className={testingStripe ? 'animate-spin' : ''} />
+                          <span>{testingStripe ? 'در حال تست...' : `تست اتصال (${stripeSettings.mode === 'live' ? 'عملیاتی Live' : 'آزمایشی Test'})`}</span>
+                        </button>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                        <div className="p-2.5 rounded-lg bg-white border border-stone-200/80 flex items-center justify-between gap-2">
-                          <span className="font-mono text-[11px] font-bold text-stone-700" dir="ltr">STRIPE_SECRET_KEY</span>
-                          <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold border ${
-                            serverEnvStatus.hasStripeSecretKey === null
-                              ? 'bg-stone-100 text-stone-500 border-stone-200'
-                              : serverEnvStatus.hasStripeSecretKey
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                : 'bg-amber-50 text-amber-800 border-amber-200'
-                          }`}>
-                            {serverEnvStatus.hasStripeSecretKey === null
-                              ? 'نامشخص'
-                              : serverEnvStatus.hasStripeSecretKey
-                                ? `فعال (${serverEnvStatus.stripeKeyMode === 'live' ? 'عملیاتی' : serverEnvStatus.stripeKeyMode === 'test' ? 'آزمایشی' : 'تنظیم‌شده'})`
-                                : 'تنظیم نشده'}
-                          </span>
+                      {vaultStatus.vaultTableMissing && (
+                        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-bold text-amber-900 leading-relaxed">
+                          برای ذخیره رمزنگاری‌شده کلیدها در دیتابیس، ابتدا فایل <code className="font-mono bg-white px-1 py-0.5 rounded" dir="ltr">supabase_secret_vault_migration.sql</code> را یک‌بار در Supabase SQL Editor اجرا کنید.
                         </div>
+                      )}
 
-                        <div className="p-2.5 rounded-lg bg-white border border-stone-200/80 flex items-center justify-between gap-2">
-                          <span className="font-mono text-[11px] font-bold text-stone-700" dir="ltr">STRIPE_WEBHOOK_SECRET</span>
-                          <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold border ${
-                            serverEnvStatus.hasStripeWebhookSecret === null
-                              ? 'bg-stone-100 text-stone-500 border-stone-200'
-                              : serverEnvStatus.hasStripeWebhookSecret
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                : 'bg-amber-50 text-amber-800 border-amber-200'
-                          }`}>
-                            {serverEnvStatus.hasStripeWebhookSecret === null
-                              ? 'نامشخص'
-                              : serverEnvStatus.hasStripeWebhookSecret
-                                ? 'امضای وب‌هوک فعال'
-                                : 'تنظیم نشده'}
+                      {stripeTestResult && (
+                        <div
+                          className={`p-3 rounded-xl border text-[11px] font-bold flex items-center gap-2 ${
+                            stripeTestResult.ok
+                              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                              : 'bg-rose-50 border-rose-200 text-rose-800'
+                          }`}
+                        >
+                          {stripeTestResult.ok ? <CheckCircle size={14} className="shrink-0" /> : <AlertCircle size={14} className="shrink-0" />}
+                          <span>{stripeTestResult.text}</span>
+                        </div>
+                      )}
+
+                      {/* Live Mode Keys */}
+                      <div className="space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-extrabold text-emerald-800">
+                            کلیدهای حالت عملیاتی و واقعی (Live)
+                            {stripeSettings.mode === 'live' && ' — حالت فعال فعلی'}
                           </span>
                         </div>
+                        <SecretKeyField
+                          secretKeyName="stripe_secret_key_live"
+                          label="کلید محرمانه عملیاتی (Live Secret Key)"
+                          placeholder="sk_live_... یا rk_live_..."
+                          value={secretDrafts.stripe_secret_key_live || ''}
+                          onChange={(val) => setSecretDrafts((prev) => ({ ...prev, stripe_secret_key_live: val }))}
+                          status={vaultStatus.secrets?.stripe_secret_key_live}
+                          validationError={validateSecretDraft('stripe_secret_key_live', secretDrafts.stripe_secret_key_live)}
+                          saving={savingSecretKey === 'stripe_secret_key_live'}
+                          deleting={deletingSecretKey === 'stripe_secret_key_live'}
+                          onSaveSecret={handleSaveVaultSecret}
+                          onDeleteSecret={handleDeleteVaultSecret}
+                          highlight={stripeSettings.mode === 'live'}
+                        />
+                        <SecretKeyField
+                          secretKeyName="stripe_webhook_secret_live"
+                          label="کلید امضای وب‌هوک عملیاتی (Live Webhook Secret)"
+                          placeholder="whsec_..."
+                          value={secretDrafts.stripe_webhook_secret_live || ''}
+                          onChange={(val) => setSecretDrafts((prev) => ({ ...prev, stripe_webhook_secret_live: val }))}
+                          status={vaultStatus.secrets?.stripe_webhook_secret_live}
+                          validationError={validateSecretDraft('stripe_webhook_secret_live', secretDrafts.stripe_webhook_secret_live)}
+                          saving={savingSecretKey === 'stripe_webhook_secret_live'}
+                          deleting={deletingSecretKey === 'stripe_webhook_secret_live'}
+                          onSaveSecret={handleSaveVaultSecret}
+                          onDeleteSecret={handleDeleteVaultSecret}
+                          highlight={stripeSettings.mode === 'live'}
+                        />
                       </div>
 
-                      {serverEnvStatus.hasStripeSecretKey &&
-                        serverEnvStatus.stripeKeyMode !== 'none' &&
-                        serverEnvStatus.stripeKeyMode !== stripeSettings.mode && (
-                        <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-[11px] font-bold text-rose-800 flex items-center gap-2">
+                      {/* Test Mode Keys */}
+                      <div className="space-y-2.5 pt-2 border-t border-stone-200/70">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-extrabold text-amber-800">
+                            کلیدهای حالت آزمایشی (Test)
+                            {stripeSettings.mode === 'test' && ' — حالت فعال فعلی'}
+                          </span>
+                        </div>
+                        <SecretKeyField
+                          secretKeyName="stripe_secret_key_test"
+                          label="کلید محرمانه آزمایشی (Test Secret Key)"
+                          placeholder="sk_test_... یا rk_test_..."
+                          value={secretDrafts.stripe_secret_key_test || ''}
+                          onChange={(val) => setSecretDrafts((prev) => ({ ...prev, stripe_secret_key_test: val }))}
+                          status={vaultStatus.secrets?.stripe_secret_key_test}
+                          validationError={validateSecretDraft('stripe_secret_key_test', secretDrafts.stripe_secret_key_test)}
+                          saving={savingSecretKey === 'stripe_secret_key_test'}
+                          deleting={deletingSecretKey === 'stripe_secret_key_test'}
+                          onSaveSecret={handleSaveVaultSecret}
+                          onDeleteSecret={handleDeleteVaultSecret}
+                          highlight={stripeSettings.mode === 'test'}
+                        />
+                        <SecretKeyField
+                          secretKeyName="stripe_webhook_secret_test"
+                          label="کلید امضای وب‌هوک آزمایشی (Test Webhook Secret)"
+                          placeholder="whsec_..."
+                          value={secretDrafts.stripe_webhook_secret_test || ''}
+                          onChange={(val) => setSecretDrafts((prev) => ({ ...prev, stripe_webhook_secret_test: val }))}
+                          status={vaultStatus.secrets?.stripe_webhook_secret_test}
+                          validationError={validateSecretDraft('stripe_webhook_secret_test', secretDrafts.stripe_webhook_secret_test)}
+                          saving={savingSecretKey === 'stripe_webhook_secret_test'}
+                          deleting={deletingSecretKey === 'stripe_webhook_secret_test'}
+                          onSaveSecret={handleSaveVaultSecret}
+                          onDeleteSecret={handleDeleteVaultSecret}
+                          highlight={stripeSettings.mode === 'test'}
+                        />
+                      </div>
+
+                      {!(vaultStatus.secrets?.[stripeSettings.mode === 'live' ? 'stripe_secret_key_live' : 'stripe_secret_key_test']?.configured) && (
+                        <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] font-bold text-amber-900 flex items-center gap-2">
                           <AlertCircle size={14} className="shrink-0" />
                           <span>
-                            هشدار عدم تطابق: کلید سرور در حالت «{serverEnvStatus.stripeKeyMode === 'live' ? 'عملیاتی' : 'آزمایشی'}» است اما حالت درگاه بالا روی «{stripeSettings.mode === 'live' ? 'عملیاتی' : 'آزمایشی'}» تنظیم شده!
+                            برای حالت انتخاب‌شده ({stripeSettings.mode === 'live' ? 'عملیاتی Live' : 'آزمایشی Test'}) هنوز کلید محرمانه در خزانه ذخیره نشده است.
                           </span>
                         </div>
                       )}
 
-                      <div className="pt-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-stone-600">
+                      <div className="pt-2 border-t border-stone-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-stone-600">
                         <span>آدرس رسمی Webhook برای ثبت در پنل Stripe:</span>
                         <div className="flex items-center gap-1.5">
-                          <code className="px-2 py-1 rounded bg-white border border-stone-200 font-mono text-[10.5px] text-zinc-900 select-all" dir="ltr">
+                          <code className="px-2 py-1 rounded bg-stone-50 border border-stone-200 font-mono text-[10.5px] text-zinc-900 select-all" dir="ltr">
                             https://www.linksho.eu/api/stripe-webhook
                           </code>
                           <button
@@ -5992,7 +6442,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       </div>
 
                       <p className="text-[11px] text-stone-500 leading-relaxed">
-                        برای امنیت حداکثری، کلید محرمانه (<code className="font-mono text-[10px]">STRIPE_SECRET_KEY</code>) و کلید وب‌هوک (<code className="font-mono text-[10px]">STRIPE_WEBHOOK_SECRET</code>) هرگز در دیتابیس ذخیره نمی‌شوند و باید فقط در تنظیمات رایگان Vercel Environment Variables ثبت گردند.
+                        کلیدهای واردشده قبل از ذخیره در دیتابیس با <strong>AES-256-GCM</strong> و کلید اختصاصی مشتق‌شده از <code className="font-mono text-[10px]" dir="ltr">SUPABASE_SERVICE_ROLE_KEY</code> رمزنگاری می‌شوند، در جدول قفل‌شده <code className="font-mono text-[10px]" dir="ltr">app_encrypted_secrets</code> نگهداری می‌گردند و هرگز به‌صورت خام به مرورگر برگردانده نمی‌شوند. دیگر نیازی به وارد کردن متغیرهای Stripe در Vercel نیست.
                       </p>
                     </div>
                   </div>
@@ -6050,7 +6500,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   className="h-10 px-6 rounded-xl bg-slate-900 hover:bg-black disabled:opacity-50 text-white font-bold text-xs inline-flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                 >
                   <Save size={15} />
-                  <span>{savingSettings ? 'در حال ذخیره‌سازی...' : 'ذخیره تنظیمات'}</span>
+                  <span>{savingSettings ? 'در حال ذخیره‌سازی...' : 'ذخیره تنظیمات درگاه و تعرفه'}</span>
                 </button>
               </form>
             </div>
@@ -6082,6 +6532,70 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   <span>{saveSuccessMsg}</span>
                 </div>
               )}
+
+              {/* Single-Vercel-Key Encrypted Secret Vault Health & Migration Card */}
+              <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={17} className="text-emerald-600 shrink-0" />
+                    <div>
+                      <h3 className="text-xs font-extrabold text-zinc-900">خزانه کلیدهای رمزنگاری‌شده (معماری تک‌کلید Vercel)</h3>
+                      <p className="text-[11px] text-stone-500">
+                        فقط <code className="font-mono" dir="ltr">SUPABASE_SERVICE_ROLE_KEY</code> در Vercel کافیست؛ بقیه کلیدها با AES-256-GCM در دیتابیس رمزنگاری و ماسک می‌شوند.
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                    vaultStatus.vaultReady
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-amber-50 text-amber-800 border-amber-200'
+                  }`}>
+                    {vaultStatus.vaultReady ? `خزانه فعال (کلید #${vaultStatus.activeKeyId || 'v1'})` : 'نیازمند اجرای فایل SQL'}
+                  </span>
+                </div>
+
+                {vaultStatus.vaultTableMissing && (
+                  <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-semibold text-amber-900 leading-relaxed">
+                    جدول‌های خزانه (<code className="font-mono" dir="ltr">app_encrypted_secrets</code> و <code className="font-mono" dir="ltr">admin_credentials</code>) هنوز در Supabase ایجاد نشده‌اند. فایل <code className="font-mono bg-white px-1 py-0.5 rounded" dir="ltr">backend/docs/supabase_secret_vault_migration.sql</code> را یک‌بار در Supabase SQL Editor اجرا کنید.
+                  </div>
+                )}
+
+                {adminAuthInfo.hasLegacyPlaintextSecrets && (
+                  <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="text-[11px] text-amber-950 leading-relaxed">
+                      <span className="font-extrabold block">کلیدهای قدیمی بدون رمزنگاری در تنظیمات پیدا شد!</span>
+                      <span>
+                        بخش‌های ({adminAuthInfo.legacyPlaintextSources.join('، ')}) هنوز نسخه متنی قدیمی دارند. با یک کلیک همه را به خزانه AES-256-GCM منتقل و نسخه متنی را پاک کنید.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={migratingSecrets}
+                      onClick={handleMigrateLegacySecrets}
+                      className="h-9 px-4 rounded-xl bg-amber-900 hover:bg-black disabled:opacity-50 text-white text-[11px] font-bold shrink-0 cursor-pointer transition-colors"
+                    >
+                      {migratingSecrets ? 'در حال رمزنگاری...' : 'رمزنگاری خودکار و پاکسازی متن ساده'}
+                    </button>
+                  </div>
+                )}
+
+                {vaultStatus.needsRewrapCount > 0 && (
+                  <div className="p-3.5 rounded-xl bg-sky-50 border border-sky-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="text-[11px] text-sky-950">
+                      <strong className="block">{vaultStatus.needsRewrapCount} کلید با کلید اصلی قبلی رمزنگاری شده‌اند.</strong>
+                      <span>برای تکمیل چرخش کلید اصلی (Key Rotation)، روی دکمه بازرمزنگاری کلیک کنید.</span>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={rewrappingSecrets}
+                      onClick={handleRewrapVaultSecrets}
+                      className="h-9 px-4 rounded-xl bg-sky-700 hover:bg-sky-800 disabled:opacity-50 text-white text-[11px] font-bold shrink-0 cursor-pointer"
+                    >
+                      {rewrappingSecrets ? 'در حال بازرمزنگاری...' : 'بازرمزنگاری کلیدها'}
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <form onSubmit={saveTurnstileSettings} className="space-y-6">
                 
@@ -6178,17 +6692,20 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       />
                     </div>
 
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید محرمانه سیستم</label>
-                      <input
-                        type="password"
-                        value={turnstileSettings.secretKey}
-                        onChange={(e) => setTurnstileSettings(prev => ({ ...prev, secretKey: e.target.value }))}
-                        placeholder={turnstileSettings.mode === 'test' ? 'حالت آزمایشی نیازی به کلید ندارد' : 'کلید محرمانه را وارد کنید'}
-                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
-                        dir="ltr"
-                      />
-                    </div>
+                    <SecretKeyField
+                      secretKeyName="turnstile_secret_key"
+                      label="کلید محرمانه سیستم (Turnstile Secret Key)"
+                      hint="مستقیماً با AES-256-GCM در خزانه دیتابیس رمزنگاری می‌شود (بدون نیاز به ثبت در Vercel)."
+                      placeholder={turnstileSettings.mode === 'test' ? 'حالت آزمایشی نیازی به کلید ندارد' : '0x4AAA... (حداقل ۲۸ کاراکتر)'}
+                      value={secretDrafts.turnstile_secret_key || ''}
+                      onChange={(val) => setSecretDrafts((prev) => ({ ...prev, turnstile_secret_key: val }))}
+                      status={vaultStatus.secrets?.turnstile_secret_key}
+                      validationError={validateSecretDraft('turnstile_secret_key', secretDrafts.turnstile_secret_key)}
+                      saving={savingSecretKey === 'turnstile_secret_key'}
+                      deleting={deletingSecretKey === 'turnstile_secret_key'}
+                      onSaveSecret={handleSaveVaultSecret}
+                      onDeleteSecret={handleDeleteVaultSecret}
+                    />
                   </div>
 
                   {/* Cloudflare Domain & Secret Key Setup Checklist */}
@@ -6204,7 +6721,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                       ۲) بررسی کنید فیلد بالا فقط <strong>Site Key</strong> (حدود ۲۴ کاراکتر) و متعلق به یک ویجت فعال و غیرحذف‌شده باشد (نه Secret Key بلندتر).
                     </p>
                     <p>
-                      ۳) اعتبارسنجی سرور از متغیر محیطی <code className="font-mono bg-white/80 px-1.5 py-0.5 rounded" dir="ltr">TURNSTILE_SECRET_KEY</code> در Vercel می‌خواند. تا زمان اصلاح ویجت کلودفلر، با تغییر «حالت اجرا» به <strong>آزمایشی</strong> سایت بلافاصله باز می‌شود.
+                      ۳) اعتبارسنجی سرور کلید محرمانه را به‌صورت خودکار از <strong>خزانه رمزنگاری‌شده دیتابیس</strong> می‌خواند. تا زمان اصلاح ویجت کلودفلر، با تغییر «حالت اجرا» به <strong>آزمایشی</strong> سایت بلافاصله باز می‌شود.
                     </p>
                   </div>
 
@@ -6255,9 +6772,184 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                   className="h-10 px-6 rounded-xl bg-slate-900 hover:bg-black disabled:opacity-50 text-white font-bold text-xs inline-flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                 >
                   <Save size={15} />
-                  <span>{savingSettings ? 'در حال ذخیره‌سازی...' : 'ذخیره تنظیمات'}</span>
+                  <span>{savingSettings ? 'در حال ذخیره‌سازی...' : 'ذخیره تنظیمات ضدبات'}</span>
                 </button>
               </form>
+
+              {/* Admin Login Account Management (DB scrypt — Zero Vercel Env ADMIN_EMAIL/PASSWORD) */}
+              <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-xs font-extrabold text-zinc-900">حساب ورود مدیر (ایمیل و رمز عبور در دیتابیس امن)</h3>
+                    <p className="text-[11px] text-stone-500 mt-0.5">
+                      ذخیره‌سازی با هش غیرقابل‌بازگشت <code className="font-mono" dir="ltr">scrypt</code> + قفل خودکار پس از ۵ تلاش اشتباه (بدون نیاز به ثبت ADMIN_EMAIL و ADMIN_PASSWORD در Vercel).
+                    </p>
+                  </div>
+                  <span className={`px-2.5 py-1 rounded-full text-[10.5px] font-bold border ${
+                    adminAuthInfo.source === 'db'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-amber-50 text-amber-800 border-amber-200'
+                  }`}>
+                    {adminAuthInfo.source === 'db' ? 'فعال از دیتابیس امن (scrypt)' : 'فعال از Vercel Env (قابل انتقال به دیتابیس)'}
+                  </span>
+                </div>
+
+                {adminAuthInfo.source === 'db' && adminAuthInfo.envAdminConfigured && (
+                  <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200/80 text-[11px] font-semibold text-emerald-800">
+                    ورود شما اکنون از دیتابیس امن انجام می‌شود؛ می‌توانید متغیرهای قدیمی <code className="font-mono" dir="ltr">ADMIN_EMAIL</code>، <code className="font-mono" dir="ltr">ADMIN_PASSWORD</code> و <code className="font-mono" dir="ltr">ADMIN_JWT_SECRET</code> را از Vercel حذف کنید.
+                  </div>
+                )}
+
+                <form onSubmit={handleUpdateAdminCredentials} className="space-y-3.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">ایمیل ورود مدیر</label>
+                      <input
+                        type="email"
+                        required
+                        dir="ltr"
+                        value={credForm.newEmail}
+                        onChange={(e) => setCredForm((prev) => ({ ...prev, newEmail: e.target.value }))}
+                        placeholder="admin@linksho.eu"
+                        className="w-full h-10 rounded-xl bg-stone-50 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">رمز عبور فعلی (الزامی برای تایید)</label>
+                      <input
+                        type="password"
+                        required
+                        dir="ltr"
+                        autoComplete="current-password"
+                        value={credForm.currentPassword}
+                        onChange={(e) => setCredForm((prev) => ({ ...prev, currentPassword: e.target.value }))}
+                        placeholder="رمز فعلی..."
+                        className="w-full h-10 rounded-xl bg-stone-50 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">رمز عبور جدید (اختیاری • حداقل ۱۰ کاراکتر)</label>
+                      <input
+                        type="password"
+                        dir="ltr"
+                        autoComplete="new-password"
+                        value={credForm.newPassword}
+                        onChange={(e) => setCredForm((prev) => ({ ...prev, newPassword: e.target.value }))}
+                        placeholder="برای تغییر رمز وارد کنید..."
+                        className="w-full h-10 rounded-xl bg-stone-50 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-stone-700 mb-1.5">تکرار رمز عبور جدید</label>
+                      <input
+                        type="password"
+                        dir="ltr"
+                        autoComplete="new-password"
+                        value={credForm.confirmPassword}
+                        onChange={(e) => setCredForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
+                        placeholder="تکرار رمز جدید..."
+                        className="w-full h-10 rounded-xl bg-stone-50 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <button
+                      type="submit"
+                      disabled={savingCreds}
+                      className="h-10 px-5 rounded-xl bg-slate-900 hover:bg-black disabled:opacity-50 text-white font-bold text-xs inline-flex items-center gap-2 cursor-pointer transition-all"
+                    >
+                      <Save size={14} />
+                      <span>{savingCreds ? 'در حال ذخیره...' : (adminAuthInfo.source === 'db' ? 'بروزرسانی ایمیل و رمز مدیر' : 'انتقال حساب مدیر به دیتابیس امن')}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={loggingOutAll}
+                      onClick={handleLogoutAllSessions}
+                      className="h-10 px-4 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 disabled:opacity-50 text-rose-700 font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <LogOut size={14} />
+                      <span>{loggingOutAll ? 'در حال چرخش کلید...' : 'خروج از همه دستگاه‌ها (چرخش کلید نشست)'}</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* System Integration Secrets Card (Resend, Cron, Cloudflare Workers) */}
+              <div className="rounded-2xl bg-white border border-stone-200/80 p-5 sm:p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)] space-y-4">
+                <div>
+                  <h3 className="text-xs font-extrabold text-zinc-900">سایر کلیدهای سیستمی (ایمیل، پاکسازی زمان‌بندی‌شده و کلودفلر)</h3>
+                  <p className="text-[11px] text-stone-500 mt-0.5">
+                    همه کلیدهای اختیاری سرویس‌ها را یک‌بار اینجا ذخیره کنید تا با AES-256-GCM رمزنگاری و ماسک شوند.
+                  </p>
+                </div>
+
+                <div className="space-y-3">
+                  <SecretKeyField
+                    secretKeyName="resend_api_key"
+                    label="کلید ارسال ایمیل Resend (هشدارهای پاکسازی)"
+                    placeholder="re_..."
+                    value={secretDrafts.resend_api_key || ''}
+                    onChange={(val) => setSecretDrafts((prev) => ({ ...prev, resend_api_key: val }))}
+                    status={vaultStatus.secrets?.resend_api_key}
+                    validationError={validateSecretDraft('resend_api_key', secretDrafts.resend_api_key)}
+                    saving={savingSecretKey === 'resend_api_key'}
+                    deleting={deletingSecretKey === 'resend_api_key'}
+                    onSaveSecret={handleSaveVaultSecret}
+                    onDeleteSecret={handleDeleteVaultSecret}
+                  />
+
+                  <SecretKeyField
+                    secretKeyName="notification_from_email"
+                    label="آدرس فرستنده ایمیل سیستم"
+                    placeholder="LinkSho <noreply@linksho.eu>"
+                    isNonSecretText={true}
+                    value={secretDrafts.notification_from_email || ''}
+                    onChange={(val) => setSecretDrafts((prev) => ({ ...prev, notification_from_email: val }))}
+                    status={vaultStatus.secrets?.notification_from_email}
+                    validationError={validateSecretDraft('notification_from_email', secretDrafts.notification_from_email)}
+                    saving={savingSecretKey === 'notification_from_email'}
+                    deleting={deletingSecretKey === 'notification_from_email'}
+                    onSaveSecret={handleSaveVaultSecret}
+                    onDeleteSecret={handleDeleteVaultSecret}
+                  />
+
+                  <SecretKeyField
+                    secretKeyName="cron_secret"
+                    label="کلید امنیتی اجرای خودکار پاکسازی (CRON_SECRET)"
+                    hint="برای فراخوانی /api/cron-cleanup از زمان‌بند بیرونی (مثل Supabase pg_cron یا cron-job.org). نکته پلتفرم Vercel: زمان‌بند داخلی vercel.json فقط وقتی هدر Bearer می‌فرستد که CRON_SECRET در Vercel هم باشد؛ در غیر این صورت از دکمه پاکسازی داخل پنل یا pg_cron استفاده کنید."
+                    placeholder="حداقل ۲۴ کاراکتر تصادفی..."
+                    canGenerate={true}
+                    value={secretDrafts.cron_secret || ''}
+                    onChange={(val) => setSecretDrafts((prev) => ({ ...prev, cron_secret: val }))}
+                    status={vaultStatus.secrets?.cron_secret}
+                    validationError={validateSecretDraft('cron_secret', secretDrafts.cron_secret)}
+                    saving={savingSecretKey === 'cron_secret'}
+                    deleting={deletingSecretKey === 'cron_secret'}
+                    onSaveSecret={handleSaveVaultSecret}
+                    onDeleteSecret={handleDeleteVaultSecret}
+                  />
+
+                  <SecretKeyField
+                    secretKeyName="cloudflare_api_token"
+                    label="توکن API کلودفلر (Workers / D1)"
+                    hint="برای مدیریت و حذف استقرارهای فروشگاه‌ساز کلودفلر (رمزنگاری‌شده در خزانه)."
+                    placeholder="توکن API کلودفلر..."
+                    value={secretDrafts.cloudflare_api_token || ''}
+                    onChange={(val) => setSecretDrafts((prev) => ({ ...prev, cloudflare_api_token: val }))}
+                    status={vaultStatus.secrets?.cloudflare_api_token}
+                    validationError={validateSecretDraft('cloudflare_api_token', secretDrafts.cloudflare_api_token)}
+                    saving={savingSecretKey === 'cloudflare_api_token'}
+                    deleting={deletingSecretKey === 'cloudflare_api_token'}
+                    onSaveSecret={handleSaveVaultSecret}
+                    onDeleteSecret={handleDeleteVaultSecret}
+                  />
+                </div>
+              </div>
             </div>
               )}
 
@@ -7552,30 +8244,36 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید دسترسی</label>
-                      <input
-                        type="password"
-                        dir="ltr"
-                        placeholder={r2Settings.hasCredentials ? 'ثبت شده (برای تغییر وارد کنید)' : 'Access Key ID'}
-                        value={r2Settings.accessKeyId || ''}
-                        onChange={(e) => setR2Settings(prev => ({ ...prev, accessKeyId: e.target.value }))}
-                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
-                      />
-                    </div>
+                  <div className="space-y-3 pt-1">
+                    <SecretKeyField
+                      secretKeyName="r2_access_key_id"
+                      label="کلید دسترسی Cloudflare R2 (Access Key ID)"
+                      hint="با رمزنگاری AES-256-GCM در خزانه دیتابیس ذخیره و ماسک می‌شود (بدون ذخیره متنی)."
+                      placeholder="Access Key ID"
+                      value={secretDrafts.r2_access_key_id || ''}
+                      onChange={(val) => setSecretDrafts((prev) => ({ ...prev, r2_access_key_id: val }))}
+                      status={vaultStatus.secrets?.r2_access_key_id}
+                      validationError={validateSecretDraft('r2_access_key_id', secretDrafts.r2_access_key_id)}
+                      saving={savingSecretKey === 'r2_access_key_id'}
+                      deleting={deletingSecretKey === 'r2_access_key_id'}
+                      onSaveSecret={handleSaveVaultSecret}
+                      onDeleteSecret={handleDeleteVaultSecret}
+                    />
 
-                    <div>
-                      <label className="block text-xs font-bold text-stone-700 mb-1.5">کلید محرمانه</label>
-                      <input
-                        type="password"
-                        dir="ltr"
-                        placeholder={r2Settings.hasCredentials ? 'ثبت شده (برای تغییر وارد کنید)' : 'Secret Access Key'}
-                        value={r2Settings.secretAccessKey || ''}
-                        onChange={(e) => setR2Settings(prev => ({ ...prev, secretAccessKey: e.target.value }))}
-                        className="w-full h-10 rounded-xl bg-stone-50 hover:bg-stone-100/70 focus:bg-white border border-stone-200/80 px-3.5 text-xs text-zinc-900 font-mono focus:border-stone-400 focus:outline-none transition-all shadow-2xs"
-                      />
-                    </div>
+                    <SecretKeyField
+                      secretKeyName="r2_secret_access_key"
+                      label="کلید محرمانه Cloudflare R2 (Secret Access Key)"
+                      hint="فقط نسخه رمزنگاری‌شده در جدول قفل‌شده نگهداری می‌شود و هرگز به مرورگر برگردانده نمی‌شود."
+                      placeholder="Secret Access Key"
+                      value={secretDrafts.r2_secret_access_key || ''}
+                      onChange={(val) => setSecretDrafts((prev) => ({ ...prev, r2_secret_access_key: val }))}
+                      status={vaultStatus.secrets?.r2_secret_access_key}
+                      validationError={validateSecretDraft('r2_secret_access_key', secretDrafts.r2_secret_access_key)}
+                      saving={savingSecretKey === 'r2_secret_access_key'}
+                      deleting={deletingSecretKey === 'r2_secret_access_key'}
+                      onSaveSecret={handleSaveVaultSecret}
+                      onDeleteSecret={handleDeleteVaultSecret}
+                    />
                   </div>
 
                   <div className="pt-1">
