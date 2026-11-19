@@ -85,15 +85,16 @@ export default function CloudflareTurnstile({
       setLoaded(true);
     };
     script.onerror = () => {
-      if (showDiagnosticErrors) {
+      if (showDiagnosticErrors || mode === 'live') {
         setErrorState({ key: effectiveKey, msg: 'بارگذاری اسکریپت کلودفلر با خطا مواجه شد.' });
+        callbacksRef.current.onExpire?.();
       } else {
         callbacksRef.current.onVerify?.('turnstile-script-fallback');
       }
       callbacksRef.current.onError?.('Script load error');
     };
     document.head.appendChild(script);
-  }, [effectiveKey, showDiagnosticErrors]);
+  }, [effectiveKey, showDiagnosticErrors, mode]);
 
   useEffect(() => {
     if (!loaded || !window.turnstile || !containerRef.current || !effectiveKey) return;
@@ -118,8 +119,9 @@ export default function CloudflareTurnstile({
         },
         'error-callback': (err) => {
           console.warn('Cloudflare Turnstile error:', err);
-          if (showDiagnosticErrors) {
+          if (showDiagnosticErrors || mode === 'live') {
             setErrorState({ key: effectiveKey, msg: formatDiagnosticError(err) });
+            callbacksRef.current.onExpire?.();
           } else {
             callbacksRef.current.onVerify?.('turnstile-error-fallback');
           }
@@ -130,8 +132,9 @@ export default function CloudflareTurnstile({
       widgetIdRef.current = widgetId;
     } catch (e) {
       console.error('Failed to render Cloudflare Turnstile widget:', e);
-      if (showDiagnosticErrors) {
+      if (showDiagnosticErrors || mode === 'live') {
         setErrorState({ key: effectiveKey, msg: 'خطا در راه‌اندازی ویجت کلودفلر' });
+        callbacksRef.current.onExpire?.();
       } else {
         callbacksRef.current.onVerify?.('turnstile-render-fallback');
       }

@@ -53,10 +53,17 @@ import {
 } from 'lucide-react';
 import CloudflareTurnstile from './CloudflareTurnstile';
 import AdCleanupSettingsSection from './AdCleanupSettingsSection';
-import { supabase } from '../lib/supabase';
 import { adminApi, getMainSiteUrl } from '../lib/apiClient';
 import { CATEGORIES, COUNTRIES, mergePortalCountries } from '../lib/translations';
 import { MAX_IMAGE_BYTES, compressImageForUpload } from '../lib/imageCompressor';
+
+let _adminSupabasePromise = null;
+async function getFallbackSupabase() {
+  if (!_adminSupabasePromise) {
+    _adminSupabasePromise = import('../lib/supabase').then((m) => m.supabase);
+  }
+  return _adminSupabasePromise;
+}
 
 // Architecture Constant: 15 records per batch (Scroll-Triggered Incremental Loading)
 const ADMIN_LIST_LIMIT = 15;
@@ -733,9 +740,10 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         return;
       }
 
-      // Fast 3-query parallel fallback (replaces 8 sequential/parallel queries)
+      // Fast 3-query parallel fallback (lazy-loads Supabase SDK only if API fallback is needed)
+      const sb = await getFallbackSupabase();
       const [firstPageRes, metaRes, settingsRes] = await Promise.all([
-        supabase
+        sb
           .from('swedpersiska_ads')
           .select('*')
           .eq('status', 'active')
@@ -745,8 +753,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
           .order('created_at', { ascending: false })
           .order('id', { ascending: false })
           .range(0, ADMIN_LIST_LIMIT - 1),
-        supabase.from('swedpersiska_ads').select('category, country, status, is_featured, views_count, created_at'),
-        supabase.from('swedpersiska_settings').select('*')
+        sb.from('swedpersiska_ads').select('category, country, status, is_featured, views_count, created_at'),
+        sb.from('swedpersiska_settings').select('*')
       ]);
 
       // Compute all aggregates in a single memory pass
@@ -896,10 +904,16 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
         return;
       }
 
+      if (apiRes && (apiRes.status === 401 || apiRes.unauthorized)) {
+        handleLogout();
+        return;
+      }
+
       const from = (safePage - 1) * ADMIN_LIST_LIMIT;
       const to = from + ADMIN_LIST_LIMIT - 1;
 
-      let q = supabase
+      const sb = await getFallbackSupabase();
+      let q = sb
         .from('swedpersiska_ads')
         .select('*', { count: 'exact' });
 
@@ -1399,10 +1413,13 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   // Pre-fetch turnstile & branding settings on login screen so Turnstile toggle in DB is respected
   useEffect(() => {
     if (isAuthenticated) return;
-    supabase
-      .from('swedpersiska_settings')
-      .select('key, value')
-      .in('key', ['turnstile_settings', 'site_branding'])
+    getFallbackSupabase()
+      .then((sb) =>
+        sb
+          .from('swedpersiska_settings')
+          .select('key, value')
+          .in('key', ['turnstile_settings', 'site_branding'])
+      )
       .then(({ data }) => {
         if (Array.isArray(data)) {
           applySettingsItems(data);
@@ -2121,7 +2138,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       if (apiRes && apiRes.ok && Array.isArray(apiRes.seller_deployments)) {
         setSellerDeployments(apiRes.seller_deployments);
       }
-      const payLink = apiRes?.invoiceUrl || dep.stripeInvoiceLink || 'https://swedpersiska.vercel.app/?page=website-builder';
+      const payLink = apiRes?.invoiceUrl || dep.stripeInvoiceLink || 'https://www.linksho.eu/?page=website-builder';
       const expDate = dep.expiresAt ? new Date(dep.expiresAt).toLocaleDateString('fa-IR') : '-';
       const expMs = dep.expiresAt ? new Date(dep.expiresAt).getTime() : Date.now();
       const overdueDays = Math.max(1, Math.ceil((Date.now() - expMs) / (24 * 60 * 60 * 1000)));
@@ -3950,7 +3967,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                         <button
                           type="button"
                           onClick={() => {
-                            const base = (getMainSiteUrl() || 'https://swedpersiska.vercel.app').replace(/\/+$/, '');
+                            const base = (getMainSiteUrl() || 'https://www.linksho.eu').replace(/\/+$/, '');
                             window.open(`${base}/?ad=${rep.reference_number || rep.ad_id}`, '_blank', 'noopener,noreferrer');
                           }}
                           className="h-9 px-3 rounded-xl border border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
@@ -5179,12 +5196,12 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                                   {dep.email}
                                 </a>
                               )}
-                              {dep.websiteUrl && (
+                              {dep.websiteUrl && /^https?:\/\//i.test(dep.websiteUrl) && (
                                 <a href={dep.websiteUrl} target="_blank" rel="noopener noreferrer" className="text-[#0066CC] hover:underline font-bold">
                                   وب‌سایت ↗
                                 </a>
                               )}
-                              {dep.panelUrl && (
+                              {dep.panelUrl && /^https?:\/\//i.test(dep.panelUrl) && (
                                 <a href={dep.panelUrl} target="_blank" rel="noopener noreferrer" className="text-[#0066CC] hover:underline font-bold">
                                   پنل فروش ↗
                                 </a>
@@ -7416,7 +7433,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                   {selectedAdForModal.contact_phone && (
                     <a
-                      href={`tel:${selectedAdForModal.contact_phone}`}
+                      href={`tel:${selectedAdForModal.contact_phone.replace(/[^0-9+]/g, '')}`}
                       className="flex items-center gap-2 text-blue-700 font-bold hover:underline"
                     >
                       <Phone size={14} className="text-blue-500 shrink-0" />
@@ -7438,7 +7455,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
                   {selectedAdForModal.contact_telegram && (
                     <a
-                      href={`https://t.me/${selectedAdForModal.contact_telegram.replace('@', '')}`}
+                      href={`https://t.me/${selectedAdForModal.contact_telegram.trim().replace(/^@+/, '').replace(/^https?:\/\/(?:www\.)?(?:t\.me|telegram\.me)\//i, '').replace(/[^a-zA-Z0-9_+]/g, '')}`}
                       target="_blank"
                       rel="noreferrer"
                       className="flex items-center gap-2 text-sky-700 font-bold hover:underline"
@@ -7516,7 +7533,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
                 <button
                   type="button"
                   onClick={() => {
-                    const base = (getMainSiteUrl() || 'https://swedpersiska.vercel.app').replace(/\/+$/, '');
+                    const base = (getMainSiteUrl() || 'https://www.linksho.eu').replace(/\/+$/, '');
                     window.open(`${base}/?ad=${selectedAdForModal.reference_number || selectedAdForModal.id}`, '_blank', 'noopener,noreferrer');
                   }}
                   className="flex-1 sm:flex-initial h-10 sm:h-9 px-3.5 rounded-xl border border-stone-200 bg-white hover:bg-stone-100 text-stone-700 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all whitespace-nowrap"

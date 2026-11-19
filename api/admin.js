@@ -9,7 +9,16 @@ const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL ||
 const HAS_SERVICE_ROLE = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJlemJueW1qY25tYXpkb25memt5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ2OTM1NjksImV4cCI6MjExMDI2OTU2OX0.ylsHBAZ1zo1z_aKpHx7hgl-yZu2yt2puFNhR8jBm6S4';
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+const ADMIN_FETCH_TIMEOUT_MS = 8000;
+function fetchWithTimeout(input, init = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ADMIN_FETCH_TIMEOUT_MS);
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey, {
+  global: { fetch: fetchWithTimeout },
+});
 
 const PAGE_SIZE = 15;
 export const MAX_BRANDING_BYTES = 1048576; // Strict 1 MB limit per branding/hero image
@@ -24,14 +33,19 @@ const ADMIN_AD_COLUMNS =
 
 const STRICT_AD_OBJECT_KEY_RE = /^ads\/\d+-[a-f0-9]{16}\.(jpg|png|webp|avif)$/i;
 
+function getTrustedClientIp(req) {
+  const realIp = req?.headers?.['x-real-ip'];
+  if (realIp) return String(realIp).trim();
+  const vercelFwd = req?.headers?.['x-vercel-forwarded-for'];
+  if (vercelFwd) return String(vercelFwd).split(',').pop().trim();
+  const fwd = req?.headers?.['x-forwarded-for'];
+  if (fwd) return String(fwd).split(',').pop().trim();
+  return 'unknown';
+}
+
 const adminLoginRateMap = new Map();
 function checkAdminLoginRateLimit(req) {
-  const ip = String(
-    req.headers?.['x-real-ip'] ||
-      req.headers?.['x-vercel-forwarded-for'] ||
-      req.headers?.['x-forwarded-for']?.split(',').pop() ||
-      'unknown'
-  ).trim();
+  const ip = getTrustedClientIp(req);
   const now = Date.now();
   const windowMs = 15 * 60 * 1000;
   const maxAttempts = 10;
@@ -128,6 +142,10 @@ function createR2PresignedPutUrl({
   return `https://${host}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`;
 }
 
+const ADMIN_R2_CACHE_TTL_MS = 3 * 60 * 1000;
+let cachedAdminR2Config = null;
+let cachedAdminR2At = 0;
+
 async function resolveAdminR2Config() {
   if (
     process.env.R2_ACCOUNT_ID &&
@@ -145,10 +163,24 @@ async function resolveAdminR2Config() {
       publicUrl: process.env.R2_PUBLIC_URL.trim().replace(/\/+$/, ''),
     };
   }
+  const now = Date.now();
+  if (cachedAdminR2Config && now - cachedAdminR2At < ADMIN_R2_CACHE_TTL_MS) {
+    return cachedAdminR2Config;
+  }
   const { data } = await supabase.from('swedpersiska_settings').select('value').eq('key', 'r2_settings').maybeSingle();
   const v = data?.value;
   if (!v?.enabled || !v.accountId || !v.accessKeyId || !v.secretAccessKey || !v.bucketName || !v.publicUrl) return null;
-  return { ...v, publicUrl: String(v.publicUrl).trim().replace(/\/+$/, '') };
+  const resolved = {
+    ...v,
+    accountId: String(v.accountId).trim(),
+    accessKeyId: String(v.accessKeyId).trim(),
+    secretAccessKey: String(v.secretAccessKey).trim(),
+    bucketName: String(v.bucketName).trim(),
+    publicUrl: String(v.publicUrl).trim().replace(/\/+$/, ''),
+  };
+  cachedAdminR2Config = resolved;
+  cachedAdminR2At = now;
+  return resolved;
 }
 
 async function deleteR2ObjectsForAdAdmin(imageUrls = [], excludeAdId = null) {
@@ -161,74 +193,73 @@ async function deleteR2ObjectsForAdAdmin(imageUrls = [], excludeAdId = null) {
   const failedKeys = [];
   const base = r2.publicUrl;
 
-  for (const url of urls) {
-    if (!String(url).startsWith(`${base}/`)) continue;
-    const rawRel = String(url).slice(base.length + 1).split('?')[0].split('#')[0];
-    let objectKey = '';
-    try {
-      objectKey = decodeURIComponent(rawRel);
-    } catch {
-      continue;
-    }
-    if (!objectKey || objectKey.includes('..') || objectKey.includes('\\') || !STRICT_AD_OBJECT_KEY_RE.test(objectKey)) continue;
-
-    const canonicalUrl = `${base}/${objectKey}`;
-    if (excludeAdId) {
+  await Promise.all(
+    urls.map(async (url) => {
+      if (!String(url).startsWith(`${base}/`)) return;
+      const rawRel = String(url).slice(base.length + 1).split('?')[0].split('#')[0];
+      let objectKey = '';
       try {
-        const urlsToCheck = canonicalUrl === url ? [canonicalUrl] : [canonicalUrl, url];
-        let stillReferenced = false;
-        for (const checkUrl of urlsToCheck) {
-          const { count } = await supabase
-            .from('swedpersiska_ads')
-            .select('id', { count: 'exact', head: true })
-            .neq('id', excludeAdId)
-            .contains('images', [checkUrl]);
-          if ((count || 0) > 0) {
-            stillReferenced = true;
-            break;
-          }
-        }
-        if (stillReferenced) continue;
+        objectKey = decodeURIComponent(rawRel);
       } catch {
-        continue;
+        return;
       }
-    }
+      if (!objectKey || objectKey.includes('..') || objectKey.includes('\\') || !STRICT_AD_OBJECT_KEY_RE.test(objectKey)) return;
 
-    try {
-      const host = `${r2.accountId}.r2.cloudflarestorage.com`;
-      const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
-      const dateStamp = amzDate.slice(0, 8);
-      const scope = `${dateStamp}/auto/s3/aws4_request`;
-      const uri = `/${r2.bucketName}/${objectKey.split('/').map(encodeRfc3986).join('/')}`;
-      const emptyHash = crypto.createHash('sha256').update('').digest('hex');
-      const headersStr = `host:${host}\nx-amz-content-sha256:${emptyHash}\nx-amz-date:${amzDate}\n`;
-      const signed = 'host;x-amz-content-sha256;x-amz-date';
-      const canonicalReq = ['DELETE', uri, '', headersStr, signed, emptyHash].join('\n');
-      const strToSign = ['AWS4-HMAC-SHA256', amzDate, scope, crypto.createHash('sha256').update(canonicalReq).digest('hex')].join('\n');
-      const hmac = (k, d) => crypto.createHmac('sha256', k).update(d, 'utf8').digest();
-      const kSigning = hmac(hmac(hmac(hmac(`AWS4${r2.secretAccessKey}`, dateStamp), 'auto'), 's3'), 'aws4_request');
-      const sig = crypto.createHmac('sha256', kSigning).update(strToSign, 'utf8').digest('hex');
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 8000);
-      try {
-        const resp = await fetch(`https://${host}${uri}`, {
-          method: 'DELETE',
-          signal: ctrl.signal,
-          headers: {
-            'x-amz-date': amzDate,
-            'x-amz-content-sha256': emptyHash,
-            Authorization: `AWS4-HMAC-SHA256 Credential=${r2.accessKeyId}/${scope}, SignedHeaders=${signed}, Signature=${sig}`,
-          },
-        });
-        if (resp.ok || resp.status === 204 || resp.status === 404) deletedKeys.push(objectKey);
-        else failedKeys.push(objectKey);
-      } finally {
-        clearTimeout(timer);
+      const canonicalUrl = `${base}/${objectKey}`;
+      if (excludeAdId) {
+        try {
+          const urlsToCheck = canonicalUrl === url ? [canonicalUrl] : [canonicalUrl, url];
+          const refChecks = await Promise.all(
+            urlsToCheck.map((checkUrl) =>
+              supabase
+                .from('swedpersiska_ads')
+                .select('id', { count: 'exact', head: true })
+                .neq('id', excludeAdId)
+                .contains('images', [checkUrl])
+            )
+          );
+          if (refChecks.some((r) => (r?.count || 0) > 0)) return;
+        } catch {
+          return;
+        }
       }
-    } catch {
-      failedKeys.push(objectKey);
-    }
-  }
+
+      try {
+        const host = `${r2.accountId}.r2.cloudflarestorage.com`;
+        const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
+        const dateStamp = amzDate.slice(0, 8);
+        const scope = `${dateStamp}/auto/s3/aws4_request`;
+        const uri = `/${r2.bucketName}/${objectKey.split('/').map(encodeRfc3986).join('/')}`;
+        const emptyHash = crypto.createHash('sha256').update('').digest('hex');
+        const headersStr = `host:${host}\nx-amz-content-sha256:${emptyHash}\nx-amz-date:${amzDate}\n`;
+        const signed = 'host;x-amz-content-sha256;x-amz-date';
+        const canonicalReq = ['DELETE', uri, '', headersStr, signed, emptyHash].join('\n');
+        const strToSign = ['AWS4-HMAC-SHA256', amzDate, scope, crypto.createHash('sha256').update(canonicalReq).digest('hex')].join('\n');
+        const hmac = (k, d) => crypto.createHmac('sha256', k).update(d, 'utf8').digest();
+        const kSigning = hmac(hmac(hmac(hmac(`AWS4${r2.secretAccessKey}`, dateStamp), 'auto'), 's3'), 'aws4_request');
+        const sig = crypto.createHmac('sha256', kSigning).update(strToSign, 'utf8').digest('hex');
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        try {
+          const resp = await fetch(`https://${host}${uri}`, {
+            method: 'DELETE',
+            signal: ctrl.signal,
+            headers: {
+              'x-amz-date': amzDate,
+              'x-amz-content-sha256': emptyHash,
+              Authorization: `AWS4-HMAC-SHA256 Credential=${r2.accessKeyId}/${scope}, SignedHeaders=${signed}, Signature=${sig}`,
+            },
+          });
+          if (resp.ok || resp.status === 204 || resp.status === 404) deletedKeys.push(objectKey);
+          else failedKeys.push(objectKey);
+        } finally {
+          clearTimeout(timer);
+        }
+      } catch {
+        failedKeys.push(objectKey);
+      }
+    })
+  );
   return { deletedKeys, failedKeys };
 }
 
@@ -394,10 +425,10 @@ export default async function handler(req, res) {
         return res.status(503).json({ ok: false, error: 'متغیرهای محیطی ADMIN_EMAIL و ADMIN_PASSWORD روی سرور مدیریت تنظیم نشده‌اند.' });
       }
 
-      // Enforce server-side Turnstile verification when live mode & secret key are configured
+      // Enforce server-side Turnstile verification (fail-closed) when live mode & secret key are configured
       const turnstileSecret = String(process.env.TURNSTILE_SECRET_KEY || '').trim();
       if (turnstileSecret) {
-        let requireTurnstile = false;
+        let requireTurnstile = true;
         try {
           const { data: tsRow } = await supabase
             .from('swedpersiska_settings')
@@ -405,8 +436,8 @@ export default async function handler(req, res) {
             .eq('key', 'turnstile_settings')
             .maybeSingle();
           const tsCfg = tsRow?.value;
-          if (tsCfg && tsCfg.enabled !== false && tsCfg.mode === 'live') {
-            requireTurnstile = true;
+          if (tsCfg && (tsCfg.enabled === false || tsCfg.protectAdminLogin === false || tsCfg.mode !== 'live')) {
+            requireTurnstile = false;
           }
         } catch {}
 
@@ -418,7 +449,11 @@ export default async function handler(req, res) {
           const tsCtrl = new AbortController();
           const tsTimer = setTimeout(() => tsCtrl.abort(), 6000);
           try {
-            const verifyBody = new URLSearchParams({ secret: turnstileSecret, response: cleanTs });
+            const verifyBody = new URLSearchParams({
+              secret: turnstileSecret,
+              response: cleanTs,
+              remoteip: getTrustedClientIp(req),
+            });
             const tsRes = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
               method: 'POST',
               body: verifyBody,
@@ -681,7 +716,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, ads: enriched, count: totalCount, page, limit, hasMore: to + 1 < totalCount });
     }
 
-    if (!HAS_SERVICE_ROLE && ['toggle_featured', 'update_status', 'update_country', 'delete_ad', 'dismiss_report', 'save_settings', 'save_cleanup_settings', 'resolve_duplicate_review', 'run_cleanup_now', 'update_website_subscription', 'generate_website_invoice_link', 'delete_website_subscription'].includes(action)) {
+    if (!HAS_SERVICE_ROLE && ['toggle_featured', 'update_status', 'update_country', 'delete_ad', 'dismiss_report', 'save_settings', 'save_cleanup_settings', 'resolve_duplicate_review', 'run_cleanup_now', 'create_website_subscription', 'update_website_subscription', 'generate_website_invoice_link', 'delete_website_subscription', 'delete_seller_deployment', 'upload_branding_file', 'test_cloudflare_connection', 'duplicate_reviews', 'cleanup_overview'].includes(action)) {
       return res.status(503).json({
         ok: false,
         error: 'متغیر امنیتی SUPABASE_SERVICE_ROLE_KEY روی سرور ادمین (Vercel) تنظیم نشده است.',
@@ -756,29 +791,37 @@ export default async function handler(req, res) {
         .maybeSingle();
       if (error) throw error;
 
+      const postStatusTasks = [];
       if (status === 'active' && activatedAd) {
         const slug = encodeURIComponent(activatedAd.reference_number || activatedAd.id);
         const cId = encodeURIComponent(activatedAd.country || 'se');
-        await notifyIndexNow(
-          [
-            `${CANONICAL_ORIGIN}/?ad=${slug}`,
-            `${CANONICAL_ORIGIN}/?c=${cId}`,
-            activatedAd.category ? `${CANONICAL_ORIGIN}/?c=${cId}&cat=${encodeURIComponent(activatedAd.category)}` : '',
-            `${CANONICAL_ORIGIN}/`,
-          ].filter(Boolean),
-          { origin: CANONICAL_ORIGIN, timeoutMs: 1200 }
-        ).catch(() => {});
+        postStatusTasks.push(
+          notifyIndexNow(
+            [
+              `${CANONICAL_ORIGIN}/?ad=${slug}`,
+              `${CANONICAL_ORIGIN}/?c=${cId}`,
+              activatedAd.category ? `${CANONICAL_ORIGIN}/?c=${cId}&cat=${encodeURIComponent(activatedAd.category)}` : '',
+              `${CANONICAL_ORIGIN}/`,
+            ].filter(Boolean),
+            { origin: CANONICAL_ORIGIN, timeoutMs: 1200 }
+          ).catch(() => {})
+        );
       }
 
       if (status === 'active' || status === 'rejected') {
-        await supabase
-          .from('ad_duplicate_reviews')
-          .update({
-            resolution: status === 'active' ? 'cleared_by_admin' : 'confirmed_duplicate',
-            resolved_at: nowIso,
-          })
-          .eq('ad_id', id)
-          .eq('resolution', 'pending');
+        postStatusTasks.push(
+          supabase
+            .from('ad_duplicate_reviews')
+            .update({
+              resolution: status === 'active' ? 'cleared_by_admin' : 'confirmed_duplicate',
+              resolved_at: nowIso,
+            })
+            .eq('ad_id', id)
+            .eq('resolution', 'pending')
+        );
+      }
+      if (postStatusTasks.length > 0) {
+        await Promise.all(postStatusTasks);
       }
       return res.status(200).json({ ok: true });
     }
@@ -805,31 +848,34 @@ export default async function handler(req, res) {
       const { error } = await supabase.from('swedpersiska_ads').delete().eq('id', id);
       if (error) throw error;
 
-      if (targetAd) {
-        await supabase.from('ad_cleanup_logs').insert({
-          ad_id: targetAd.id,
-          ad_reference_number: targetAd.reference_number,
-          ad_title: targetAd.title_fa || targetAd.title,
-          action: 'permanently_deleted',
-          reason: 'حذف دائمی توسط مدیریت',
-        });
-      }
-
-      try {
-        const { data: repRow } = await supabase
-          .from('swedpersiska_settings')
-          .select('value')
-          .eq('key', 'ad_reports')
-          .maybeSingle();
-        if (Array.isArray(repRow?.value)) {
-          const filtered = repRow.value.filter((r) => String(r.ad_id) !== String(id));
-          await supabase.from('swedpersiska_settings').upsert({
-            key: 'ad_reports',
-            value: filtered,
-            updated_at: new Date().toISOString()
-          });
-        }
-      } catch {}
+      await Promise.all([
+        targetAd
+          ? supabase.from('ad_cleanup_logs').insert({
+              ad_id: targetAd.id,
+              ad_reference_number: targetAd.reference_number,
+              ad_title: targetAd.title_fa || targetAd.title,
+              action: 'permanently_deleted',
+              reason: 'حذف دائمی توسط مدیریت',
+            })
+          : Promise.resolve(),
+        (async () => {
+          try {
+            const { data: repRow } = await supabase
+              .from('swedpersiska_settings')
+              .select('value')
+              .eq('key', 'ad_reports')
+              .maybeSingle();
+            if (Array.isArray(repRow?.value)) {
+              const filtered = repRow.value.filter((r) => String(r.ad_id) !== String(id));
+              await supabase.from('swedpersiska_settings').upsert({
+                key: 'ad_reports',
+                value: filtered,
+                updated_at: new Date().toISOString(),
+              });
+            }
+          } catch {}
+        })(),
+      ]);
       return res.status(200).json({ ok: true });
     }
 
@@ -884,25 +930,17 @@ export default async function handler(req, res) {
         return res.status(400).json({ ok: false, error: 'حداکثر حجم هر تصویر ۱ مگابایت است.' });
       }
 
-      let r2 = null;
-      if (process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET_NAME && process.env.R2_PUBLIC_URL) {
-        r2 = {
-          enabled: true,
-          accountId: process.env.R2_ACCOUNT_ID.trim(),
-          accessKeyId: process.env.R2_ACCESS_KEY_ID.trim(),
-          secretAccessKey: process.env.R2_SECRET_ACCESS_KEY.trim(),
-          bucketName: process.env.R2_BUCKET_NAME.trim(),
-          publicUrl: process.env.R2_PUBLIC_URL.trim().replace(/\/+$/, ''),
-        };
-      } else {
-        const { data: r2Row } = await supabase.from('swedpersiska_settings').select('value').eq('key', 'r2_settings').maybeSingle();
-        if (r2Row?.value?.enabled && r2Row.value.accountId && r2Row.value.accessKeyId && r2Row.value.secretAccessKey && r2Row.value.bucketName && r2Row.value.publicUrl) {
-          r2 = {
-            ...r2Row.value,
-            publicUrl: String(r2Row.value.publicUrl).trim().replace(/\/+$/, ''),
-          };
+      if (ext === 'svg') {
+        const svgText = buf.toString('utf8');
+        if (
+          !/<svg[\s>]/i.test(svgText) ||
+          /<script[\s>]|<foreignObject[\s>]|<iframe[\s>]|<object[\s>]|<embed[\s>]|\bon[a-z]+\s*=|javascript:|data:text\/html/i.test(svgText)
+        ) {
+          return res.status(400).json({ ok: false, error: 'فایل SVG حاوی تگ یا اسکریپت غیرمجاز است.' });
         }
       }
+
+      const r2 = await resolveAdminR2Config();
 
       if (!r2) {
         return res.status(400).json({ ok: false, error: 'فضای ابری Cloudflare R2 در تنظیمات فعال نشده است.' });
@@ -971,7 +1009,18 @@ export default async function handler(req, res) {
         return res.status(result.status).json(result.body);
       }
       let nextValue = value;
-      if (key === 'stripe_settings') {
+      if (key === 'turnstile_settings' && value && typeof value === 'object' && !Array.isArray(value)) {
+        nextValue = {
+          enabled: value.enabled !== false,
+          mode: value.mode === 'live' ? 'live' : 'test',
+          siteKey: String(value.siteKey || '').replace(/[\s\u200B-\u200D\uFEFF]/g, '').slice(0, 64),
+          protectAdminLogin: value.protectAdminLogin !== false,
+          protectPostAd: value.protectPostAd !== false,
+        };
+      } else if (key === 'r2_settings') {
+        cachedAdminR2Config = null;
+        cachedAdminR2At = 0;
+      } else if (key === 'stripe_settings') {
         if (!value || typeof value !== 'object' || Array.isArray(value)) {
           return res.status(400).json({ ok: false, error: 'فرمت تنظیمات درگاه پرداخت نامعتبر است.' });
         }
@@ -1090,6 +1139,9 @@ export default async function handler(req, res) {
           subdomain: '',
         });
       }
+      if (!/^[a-f0-9]{32}$/i.test(accountId)) {
+        return res.status(400).json({ ok: false, error: 'فرمت Account ID کلودفلر معتبر نیست.' });
+      }
 
       const subRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`, {
         headers: { Authorization: `Bearer ${cfToken}` },
@@ -1128,7 +1180,7 @@ export default async function handler(req, res) {
           const accJson = await accRes.json().catch(() => ({}));
           accountId = accJson?.result?.[0]?.id || '';
         }
-        if (accountId) {
+        if (accountId && /^[a-f0-9]{32}$/i.test(accountId)) {
           await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${encodeURIComponent(workerName)}`, {
             method: 'DELETE',
             headers: { Authorization: `Bearer ${cfToken}` },
@@ -1149,11 +1201,12 @@ export default async function handler(req, res) {
         .maybeSingle();
       const prevList = Array.isArray(depRow?.value) ? depRow.value : [];
       const nextList = prevList.filter((x) => x.workerName !== workerName);
-      await supabase.from('swedpersiska_settings').upsert({
+      const { error: upsertErr } = await supabase.from('swedpersiska_settings').upsert({
         key: 'seller_deployments',
         value: nextList,
         updated_at: new Date().toISOString(),
       });
+      if (upsertErr) throw upsertErr;
 
       return res.status(200).json({ ok: true, seller_deployments: nextList });
     }
@@ -1223,11 +1276,12 @@ export default async function handler(req, res) {
       };
 
       const nextList = [newSub, ...prevList].slice(0, 500);
-      await supabase.from('swedpersiska_settings').upsert({
+      const { error: upsertErr } = await supabase.from('swedpersiska_settings').upsert({
         key: 'seller_deployments',
         value: nextList,
         updated_at: createdAt,
       });
+      if (upsertErr) throw upsertErr;
 
       return res.status(200).json({ ok: true, seller_deployments: nextList, subscription: newSub });
     }
@@ -1301,11 +1355,12 @@ export default async function handler(req, res) {
 
       next.updatedAt = new Date().toISOString();
       const nextList = prevList.map((item, i) => (i === idx ? next : item));
-      await supabase.from('swedpersiska_settings').upsert({
+      const { error: upsertErr } = await supabase.from('swedpersiska_settings').upsert({
         key: 'seller_deployments',
         value: nextList,
         updated_at: new Date().toISOString(),
       });
+      if (upsertErr) throw upsertErr;
 
       return res.status(200).json({ ok: true, seller_deployments: nextList, subscription: next });
     }
@@ -1332,14 +1387,14 @@ export default async function handler(req, res) {
 
       const current = prevList[idx];
       const secretKey = String(process.env.STRIPE_SECRET_KEY || '').trim();
-      let invoiceUrl = current.stripeInvoiceLink || 'https://swedpersiska.vercel.app/?page=website-builder';
+      let invoiceUrl = current.stripeInvoiceLink || `${CANONICAL_ORIGIN}/?page=website-builder`;
       let isStripeLive = false;
 
       if (secretKey) {
         const params = new URLSearchParams();
         params.set('mode', 'payment');
-        params.set('success_url', 'https://swedpersiska.vercel.app/?page=website-builder&renew_session_id={CHECKOUT_SESSION_ID}');
-        params.set('cancel_url', 'https://swedpersiska.vercel.app/?page=website-builder&cancelled=1');
+        params.set('success_url', `${CANONICAL_ORIGIN}/?page=website-builder&renew_session_id={CHECKOUT_SESSION_ID}`);
+        params.set('cancel_url', `${CANONICAL_ORIGIN}/?page=website-builder&cancelled=1`);
         if (current.email) params.set('customer_email', current.email);
         params.set('line_items[0][price_data][currency]', 'sek');
         params.set('line_items[0][price_data][unit_amount]', '26000');
@@ -1375,11 +1430,12 @@ export default async function handler(req, res) {
         updatedAt: nowIso,
       };
       const nextList = prevList.map((item, i) => (i === idx ? next : item));
-      await supabase.from('swedpersiska_settings').upsert({
+      const { error: upsertErr } = await supabase.from('swedpersiska_settings').upsert({
         key: 'seller_deployments',
         value: nextList,
         updated_at: nowIso,
       });
+      if (upsertErr) throw upsertErr;
 
       return res.status(200).json({
         ok: true,
@@ -1407,11 +1463,12 @@ export default async function handler(req, res) {
         (x) => !((storeId && x.storeId === storeId) || (workerName && x.workerName === workerName))
       );
 
-      await supabase.from('swedpersiska_settings').upsert({
+      const { error: upsertErr } = await supabase.from('swedpersiska_settings').upsert({
         key: 'seller_deployments',
         value: nextList,
         updated_at: new Date().toISOString(),
       });
+      if (upsertErr) throw upsertErr;
 
       return res.status(200).json({ ok: true, seller_deployments: nextList });
     }
@@ -1474,41 +1531,45 @@ export default async function handler(req, res) {
         .maybeSingle();
 
       if (decision === 'cleared_by_admin') {
-        await supabase
-          .from('swedpersiska_ads')
-          .update({
-            duplicate_detection_status: 'cleared_by_admin',
-            status: 'active',
-            deleted_at: null,
-            last_meaningful_activity_at: nowIso,
-            sort_timestamp: nowIso,
-            cleanup_warning_sent_at: null,
-            scheduled_deletion_at: null,
-            updated_at: nowIso,
-          })
-          .eq('id', review.ad_id);
+        const tasks = [
+          supabase
+            .from('swedpersiska_ads')
+            .update({
+              duplicate_detection_status: 'cleared_by_admin',
+              status: 'active',
+              deleted_at: null,
+              last_meaningful_activity_at: nowIso,
+              sort_timestamp: nowIso,
+              cleanup_warning_sent_at: null,
+              scheduled_deletion_at: null,
+              updated_at: nowIso,
+            })
+            .eq('id', review.ad_id),
+        ];
 
         if (adRow) {
           const slug = encodeURIComponent(adRow.reference_number || adRow.id);
           const cId = encodeURIComponent(adRow.country || 'se');
-          await notifyIndexNow(
-            [
-              `${CANONICAL_ORIGIN}/?ad=${slug}`,
-              `${CANONICAL_ORIGIN}/?c=${cId}`,
-              `${CANONICAL_ORIGIN}/`,
-            ],
-            { origin: CANONICAL_ORIGIN }
-          ).catch(() => {});
-
-          await supabase.from('ad_notifications').insert({
-            ad_id: adRow.id,
-            ad_reference_number: adRow.reference_number,
-            recipient_email: adRow.contact_email,
-            notification_type: 'duplicate_cleared',
-            title: 'آگهی شما تایید و منتشر شد',
-            message: `بررسی مدیریت تایید کرد که آگهی «${adRow.title_fa || adRow.title}» (${adRow.reference_number}) تکراری نیست و اکنون در سایت منتشر شده است.`,
-          });
+          tasks.push(
+            notifyIndexNow(
+              [
+                `${CANONICAL_ORIGIN}/?ad=${slug}`,
+                `${CANONICAL_ORIGIN}/?c=${cId}`,
+                `${CANONICAL_ORIGIN}/`,
+              ],
+              { origin: CANONICAL_ORIGIN, timeoutMs: 1200 }
+            ).catch(() => {}),
+            supabase.from('ad_notifications').insert({
+              ad_id: adRow.id,
+              ad_reference_number: adRow.reference_number,
+              recipient_email: adRow.contact_email,
+              notification_type: 'duplicate_cleared',
+              title: 'آگهی شما تایید و منتشر شد',
+              message: `بررسی مدیریت تایید کرد که آگهی «${adRow.title_fa || adRow.title}» (${adRow.reference_number}) تکراری نیست و اکنون در سایت منتشر شده است.`,
+            })
+          );
         }
+        await Promise.all(tasks);
       } else {
         await supabase
           .from('swedpersiska_ads')
