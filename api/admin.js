@@ -13,9 +13,37 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 const PAGE_SIZE = 15;
 export const MAX_BRANDING_BYTES = 1048576; // Strict 1 MB limit per branding/hero image
-const FALLBACK_SECRET_SEED = `${supabaseKey}:${process.env.ADMIN_PASSWORD || process.env.VITE_ADMIN_PASSWORD || 'Sam@13321332'}:linksho-admin-v1`;
-const DETERMINISTIC_FALLBACK_SECRET = crypto.createHash('sha256').update(FALLBACK_SECRET_SEED, 'utf8').digest('hex');
-const TOKEN_SECRET = process.env.ADMIN_JWT_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || DETERMINISTIC_FALLBACK_SECRET;
+const EPHEMERAL_DEV_SECRET = crypto.randomBytes(32).toString('hex');
+const TOKEN_SECRET =
+  process.env.ADMIN_JWT_SECRET ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  (process.env.VERCEL_ENV === 'production' ? '' : EPHEMERAL_DEV_SECRET);
+
+const ADMIN_AD_COLUMNS =
+  'id, reference_number, title, title_fa, category, country, city, area, price, price_type, description, contact_name, contact_phone, contact_whatsapp, contact_telegram, contact_email, contact_website, images, is_featured, status, views_count, created_at, updated_at, last_boosted_at, last_meaningful_activity_at, sort_timestamp, next_free_boost_at, boost_count, duplicate_detection_status, duplicate_score, duplicate_of_ad_id, cleanup_warning_sent_at, scheduled_deletion_at, deleted_at, promotion_expires_at, is_disputed';
+
+const STRICT_AD_OBJECT_KEY_RE = /^ads\/\d+-[a-f0-9]{16}\.(jpg|png|webp|avif)$/i;
+
+const adminLoginRateMap = new Map();
+function checkAdminLoginRateLimit(req) {
+  const ip = String(
+    req.headers?.['x-real-ip'] ||
+      req.headers?.['x-vercel-forwarded-for'] ||
+      req.headers?.['x-forwarded-for']?.split(',').pop() ||
+      'unknown'
+  ).trim();
+  const now = Date.now();
+  const windowMs = 15 * 60 * 1000;
+  const maxAttempts = 10;
+  const entry = adminLoginRateMap.get(ip);
+  if (!entry || now - entry.start > windowMs) {
+    adminLoginRateMap.set(ip, { start: now, count: 1 });
+    return true;
+  }
+  if (entry.count >= maxAttempts) return false;
+  entry.count += 1;
+  return true;
+}
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://www.linksho.eu,https://linksho.eu,https://admin.linksho.eu,https://farsinord-admin.vercel.app,https://swedpersiska.vercel.app,https://farsinord.vercel.app,https://farsinord-frontend.vercel.app')
   .split(',')
@@ -135,18 +163,35 @@ async function deleteR2ObjectsForAdAdmin(imageUrls = [], excludeAdId = null) {
 
   for (const url of urls) {
     if (!String(url).startsWith(`${base}/`)) continue;
-    const objectKey = decodeURIComponent(String(url).slice(base.length + 1).split('?')[0]);
-    if (!objectKey || objectKey.includes('..')) continue;
+    const rawRel = String(url).slice(base.length + 1).split('?')[0].split('#')[0];
+    let objectKey = '';
+    try {
+      objectKey = decodeURIComponent(rawRel);
+    } catch {
+      continue;
+    }
+    if (!objectKey || objectKey.includes('..') || objectKey.includes('\\') || !STRICT_AD_OBJECT_KEY_RE.test(objectKey)) continue;
 
+    const canonicalUrl = `${base}/${objectKey}`;
     if (excludeAdId) {
       try {
-        const { count } = await supabase
-          .from('swedpersiska_ads')
-          .select('id', { count: 'exact', head: true })
-          .neq('id', excludeAdId)
-          .contains('images', [url]);
-        if ((count || 0) > 0) continue;
-      } catch {}
+        const urlsToCheck = canonicalUrl === url ? [canonicalUrl] : [canonicalUrl, url];
+        let stillReferenced = false;
+        for (const checkUrl of urlsToCheck) {
+          const { count } = await supabase
+            .from('swedpersiska_ads')
+            .select('id', { count: 'exact', head: true })
+            .neq('id', excludeAdId)
+            .contains('images', [checkUrl]);
+          if ((count || 0) > 0) {
+            stillReferenced = true;
+            break;
+          }
+        }
+        if (stillReferenced) continue;
+      } catch {
+        continue;
+      }
     }
 
     try {
@@ -163,16 +208,23 @@ async function deleteR2ObjectsForAdAdmin(imageUrls = [], excludeAdId = null) {
       const hmac = (k, d) => crypto.createHmac('sha256', k).update(d, 'utf8').digest();
       const kSigning = hmac(hmac(hmac(hmac(`AWS4${r2.secretAccessKey}`, dateStamp), 'auto'), 's3'), 'aws4_request');
       const sig = crypto.createHmac('sha256', kSigning).update(strToSign, 'utf8').digest('hex');
-      const resp = await fetch(`https://${host}${uri}`, {
-        method: 'DELETE',
-        headers: {
-          'x-amz-date': amzDate,
-          'x-amz-content-sha256': emptyHash,
-          Authorization: `AWS4-HMAC-SHA256 Credential=${r2.accessKeyId}/${scope}, SignedHeaders=${signed}, Signature=${sig}`,
-        },
-      });
-      if (resp.ok || resp.status === 204 || resp.status === 404) deletedKeys.push(objectKey);
-      else failedKeys.push(objectKey);
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        const resp = await fetch(`https://${host}${uri}`, {
+          method: 'DELETE',
+          signal: ctrl.signal,
+          headers: {
+            'x-amz-date': amzDate,
+            'x-amz-content-sha256': emptyHash,
+            Authorization: `AWS4-HMAC-SHA256 Credential=${r2.accessKeyId}/${scope}, SignedHeaders=${signed}, Signature=${sig}`,
+          },
+        });
+        if (resp.ok || resp.status === 204 || resp.status === 404) deletedKeys.push(objectKey);
+        else failedKeys.push(objectKey);
+      } finally {
+        clearTimeout(timer);
+      }
     } catch {
       failedKeys.push(objectKey);
     }
@@ -303,13 +355,15 @@ async function saveAndAuditCleanupSettings(rawValue, adminSession) {
 
 function setCorsHeaders(req, res) {
   const origin = req.headers.origin;
-  if (origin && (ALLOWED_ORIGINS.includes(origin) || /^http:\/\/localhost:\d+$/.test(origin))) {
+  const isDevLocalhost = process.env.VERCEL_ENV !== 'production' && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin || '');
+  if (origin && (ALLOWED_ORIGINS.includes(origin) || isDevLocalhost)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'no-store');
 }
 
 export default async function handler(req, res) {
@@ -327,13 +381,64 @@ export default async function handler(req, res) {
 
     // 1. Admin Login Endpoint (Unauthenticated -> Issues Signed Token)
     if (req.method === 'POST' && action === 'login') {
+      if (!checkAdminLoginRateLimit(req)) {
+        return res.status(429).json({ ok: false, error: 'تعداد تلاش‌های ورود بیش از حد مجاز است. لطفاً ۱۵ دقیقه دیگر دوباره امتحان کنید.' });
+      }
+      if (!TOKEN_SECRET) {
+        return res.status(503).json({ ok: false, error: 'تنظیمات امنیتی سرور مدیریت (ADMIN_JWT_SECRET) تکمیل نشده است.' });
+      }
+
+      const validEmail = String(process.env.ADMIN_EMAIL || '').toLowerCase().trim();
+      const validPass = String(process.env.ADMIN_PASSWORD || '').trim();
+      if (!validEmail || !validPass) {
+        return res.status(503).json({ ok: false, error: 'متغیرهای محیطی ADMIN_EMAIL و ADMIN_PASSWORD روی سرور مدیریت تنظیم نشده‌اند.' });
+      }
+
+      // Enforce server-side Turnstile verification when live mode & secret key are configured
+      const turnstileSecret = String(process.env.TURNSTILE_SECRET_KEY || '').trim();
+      if (turnstileSecret) {
+        let requireTurnstile = false;
+        try {
+          const { data: tsRow } = await supabase
+            .from('swedpersiska_settings')
+            .select('value')
+            .eq('key', 'turnstile_settings')
+            .maybeSingle();
+          const tsCfg = tsRow?.value;
+          if (tsCfg && tsCfg.enabled !== false && tsCfg.mode === 'live') {
+            requireTurnstile = true;
+          }
+        } catch {}
+
+        if (requireTurnstile) {
+          const cleanTs = String(body.turnstileToken || '').trim();
+          if (!cleanTs) {
+            return res.status(403).json({ ok: false, error: 'تایید امنیتی کپچا برای ورود مدیر الزامی است.' });
+          }
+          const tsCtrl = new AbortController();
+          const tsTimer = setTimeout(() => tsCtrl.abort(), 6000);
+          try {
+            const verifyBody = new URLSearchParams({ secret: turnstileSecret, response: cleanTs });
+            const tsRes = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+              method: 'POST',
+              body: verifyBody,
+              signal: tsCtrl.signal,
+            });
+            const tsJson = await tsRes.json().catch(() => ({}));
+            if (!tsRes.ok || !tsJson.success) {
+              return res.status(403).json({ ok: false, error: 'تایید امنیتی کپچا نامعتبر است. لطفاً مجدداً امتحان کنید.' });
+            }
+          } catch {
+            return res.status(503).json({ ok: false, error: 'خطا در بررسی امنیتی کپچا. لطفاً لحظاتی بعد دوباره تلاش کنید.' });
+          } finally {
+            clearTimeout(tsTimer);
+          }
+        }
+      }
+
       const email = String(body.email || '').trim().toLowerCase();
       const password = String(body.password || '').trim();
-
-      const validEmail = (process.env.ADMIN_EMAIL || process.env.VITE_ADMIN_EMAIL || 'swedpersiska@gmail.com').toLowerCase().trim();
-      const validPass = process.env.ADMIN_PASSWORD || process.env.VITE_ADMIN_PASSWORD || 'Sam@13321332';
-
-      const allowedEmails = [validEmail, 'swedpersiska@gmail.com', 'admin@linksho.com', 'admin@swedpersiska.se'];
+      const allowedEmails = validEmail.split(',').map((e) => e.trim()).filter(Boolean);
       const isEmailValid = allowedEmails.some((addr) => safeEqual(email, addr));
       const isPassValid = safeEqual(password, validPass);
 
@@ -362,7 +467,7 @@ export default async function handler(req, res) {
       const [firstPageRes, statsRpcRes, settingsRes, dupCountRes, openReportsRes] = await Promise.all([
         supabase
           .from('swedpersiska_ads')
-          .select('*')
+          .select(ADMIN_AD_COLUMNS)
           .eq('status', 'active')
           .is('deleted_at', null)
           .order('is_featured', { ascending: false })
@@ -542,7 +647,7 @@ export default async function handler(req, res) {
 
       let q = supabase
         .from('swedpersiska_ads')
-        .select('*', { count: 'exact' });
+        .select(ADMIN_AD_COLUMNS, { count: 'exact' });
 
       if (status === 'deleted') {
         q = q.not('deleted_at', 'is', null);
@@ -555,7 +660,7 @@ export default async function handler(req, res) {
       if (country && country !== 'all') q = q.eq('country', country);
       if (category && category !== 'all') q = q.eq('category', category);
       if (search) {
-        const sanitized = search.replace(/[,()]/g, ' ').trim();
+        const sanitized = search.slice(0, 100).replace(/[,()"'\\*%_]/g, ' ').replace(/\s+/g, ' ').trim();
         if (sanitized) {
           const term = `%${sanitized}%`;
           q = q.or(`title.ilike.${term},description.ilike.${term},city.ilike.${term},reference_number.ilike.${term},contact_name.ilike.${term}`);
@@ -586,12 +691,14 @@ export default async function handler(req, res) {
     if (action === 'toggle_featured') {
       const { id, is_featured } = body;
       const enableVip = Boolean(is_featured);
-      const { data: stripeRow } = await supabase.from('swedpersiska_settings').select('value').eq('key', 'stripe_settings').maybeSingle();
+      const [{ data: stripeRow }, { data: adRow }] = await Promise.all([
+        supabase.from('swedpersiska_settings').select('value').eq('key', 'stripe_settings').maybeSingle(),
+        supabase.from('swedpersiska_ads').select('country, last_meaningful_activity_at').eq('id', id).maybeSingle(),
+      ]);
       const durationDays = Math.max(1, Math.min(365, Number(stripeRow?.value?.vipDurationDays) || 30));
       const nowIso = new Date().toISOString();
       const expiresAt = enableVip ? new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString() : null;
 
-      const { data: adRow } = await supabase.from('swedpersiska_ads').select('country, last_meaningful_activity_at').eq('id', id).maybeSingle();
       const { error } = await supabase
         .from('swedpersiska_ads')
         .update({
@@ -641,28 +748,26 @@ export default async function handler(req, res) {
         updatePayload.cleanup_warning_sent_at = null;
         updatePayload.scheduled_deletion_at = null;
       }
-      const { error } = await supabase.from('swedpersiska_ads').update(updatePayload).eq('id', id);
+      const { data: activatedAd, error } = await supabase
+        .from('swedpersiska_ads')
+        .update(updatePayload)
+        .eq('id', id)
+        .select('id, reference_number, country, category')
+        .maybeSingle();
       if (error) throw error;
 
-      if (status === 'active') {
-        const { data: activatedAd } = await supabase
-          .from('swedpersiska_ads')
-          .select('id, reference_number, country, category')
-          .eq('id', id)
-          .maybeSingle();
-        if (activatedAd) {
-          const slug = encodeURIComponent(activatedAd.reference_number || activatedAd.id);
-          const cId = encodeURIComponent(activatedAd.country || 'se');
-          await notifyIndexNow(
-            [
-              `${CANONICAL_ORIGIN}/?ad=${slug}`,
-              `${CANONICAL_ORIGIN}/?c=${cId}`,
-              activatedAd.category ? `${CANONICAL_ORIGIN}/?c=${cId}&cat=${encodeURIComponent(activatedAd.category)}` : '',
-              `${CANONICAL_ORIGIN}/`,
-            ].filter(Boolean),
-            { origin: CANONICAL_ORIGIN }
-          ).catch(() => {});
-        }
+      if (status === 'active' && activatedAd) {
+        const slug = encodeURIComponent(activatedAd.reference_number || activatedAd.id);
+        const cId = encodeURIComponent(activatedAd.country || 'se');
+        await notifyIndexNow(
+          [
+            `${CANONICAL_ORIGIN}/?ad=${slug}`,
+            `${CANONICAL_ORIGIN}/?c=${cId}`,
+            activatedAd.category ? `${CANONICAL_ORIGIN}/?c=${cId}&cat=${encodeURIComponent(activatedAd.category)}` : '',
+            `${CANONICAL_ORIGIN}/`,
+          ].filter(Boolean),
+          { origin: CANONICAL_ORIGIN, timeoutMs: 1200 }
+        ).catch(() => {});
       }
 
       if (status === 'active' || status === 'rejected') {
@@ -1566,6 +1671,7 @@ export default async function handler(req, res) {
 
     return res.status(400).json({ ok: false, error: 'Unknown admin action' });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: err.message || 'Internal Server Error' });
+    console.error('[admin] error:', err?.message || err);
+    return res.status(500).json({ ok: false, error: 'خطای داخلی سرور مدیریت.' });
   }
 }

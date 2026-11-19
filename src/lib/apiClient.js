@@ -48,44 +48,30 @@ export const adminApi = {
     } catch {}
   },
 
-  async login(email, password) {
+  async login(email, password, turnstileToken = '') {
     const cleanEmail = String(email || '').trim().toLowerCase();
     const cleanPass = String(password || '').trim();
 
-    try {
-      const res = await fetch(`${API_BASE}/api/admin`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'login', email: cleanEmail, password: cleanPass })
-      });
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const json = await res.json();
-        if (!res.ok || !json.ok) {
-          throw new Error(json.error || 'ایمیل یا رمز عبور اشتباه است.');
-        }
-        this.setToken(json.token);
-        return json;
-      }
-    } catch (err) {
-      if (err.message && err.message.includes('اشتباه')) throw err;
+    const res = await fetch(`${API_BASE}/api/admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'login',
+        email: cleanEmail,
+        password: cleanPass,
+        turnstileToken: String(turnstileToken || '').trim() || undefined,
+      })
+    });
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      throw new Error('پاسخ نامعتبر از سرور مدیریت دریافت شد.');
     }
-
-    // Fallback when serverless endpoint is not mounted (e.g. static preview)
-    const fallbackEmails = [
-      (import.meta.env.VITE_ADMIN_EMAIL || 'swedpersiska@gmail.com').toLowerCase().trim(),
-      'swedpersiska@gmail.com',
-      'admin@linksho.com',
-      'admin@swedpersiska.se'
-    ];
-    const fallbackPass = import.meta.env.VITE_ADMIN_PASSWORD || 'Sam@13321332';
-    if (fallbackEmails.includes(cleanEmail) && cleanPass === fallbackPass) {
-      const localToken = `local.${btoa(JSON.stringify({ sub: cleanEmail, role: 'admin', exp: Date.now() + 86400000 }))}`;
-      this.setToken(localToken);
-      return { ok: true, token: localToken, email: cleanEmail };
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      throw new Error(json.error || 'ایمیل یا رمز عبور اشتباه است.');
     }
-
-    throw new Error('ایمیل یا رمز عبور اشتباه است.');
+    this.setToken(json.token);
+    return json;
   },
 
   async request(action, payload = {}) {

@@ -1386,7 +1386,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
 
     setLoginSubmitting(true);
     try {
-      await adminApi.login(adminEmailInput, adminPassInput);
+      await adminApi.login(adminEmailInput, adminPassInput, adminTurnstileToken);
       setIsAuthenticated(true);
       fetchAdminData();
     } catch (err) {
