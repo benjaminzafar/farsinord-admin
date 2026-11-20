@@ -1232,7 +1232,7 @@ export default async function handler(req, res) {
       });
       const stripeJson = await stripeRes.json().catch(() => ({}));
       if (!stripeRes.ok) {
-        return res.status(401).json({
+        return res.status(422).json({
           ok: false,
           error: stripeJson?.error?.message || 'کلید Stripe توسط سرور استرایپ رد شد.',
         });
@@ -1282,13 +1282,13 @@ export default async function handler(req, res) {
 
       if (existingCred) {
         if (!verifyAdminPassword(currentPassword, existingCred.password_hash, existingCred.password_salt)) {
-          return res.status(401).json({ ok: false, error: 'رمز عبور فعلی اشتباه است.' });
+          return res.status(403).json({ ok: false, error: 'رمز عبور فعلی اشتباه است.' });
         }
       } else {
         // Migrating from Vercel Env ADMIN_EMAIL / ADMIN_PASSWORD into DB
         const envPass = String(process.env.ADMIN_PASSWORD || '').trim();
         if (!envPass || !safeEqual(currentPassword.trim(), envPass)) {
-          return res.status(401).json({ ok: false, error: 'رمز عبور فعلی اشتباه است.' });
+          return res.status(403).json({ ok: false, error: 'رمز عبور فعلی اشتباه است.' });
         }
       }
 
@@ -1892,7 +1892,7 @@ export default async function handler(req, res) {
       });
       const verifyJson = await verifyRes.json().catch(() => ({}));
       if (!verifyRes.ok || verifyJson.success === false) {
-        return res.status(401).json({
+        return res.status(422).json({
           ok: false,
           error: verifyJson?.errors?.[0]?.message || 'توکن کلودفلر نامعتبر یا منقضی شده است.',
         });

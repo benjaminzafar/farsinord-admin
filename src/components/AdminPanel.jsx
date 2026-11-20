@@ -619,6 +619,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
   const [emailDraftPreview, setEmailDraftPreview] = useState(null);
 
   const [adminTurnstileToken, setAdminTurnstileToken] = useState('');
+  const [turnstileResetKey, setTurnstileResetKey] = useState(0);
   const [savingSettings, setSavingSettings] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
 
@@ -1374,6 +1375,8 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
       fetchAdminData();
     } catch (err) {
       setLoginError(err.message || 'ایمیل یا رمز عبور اشتباه است.');
+      setAdminTurnstileToken('');
+      setTurnstileResetKey(prev => prev + 1);
       if (err.needsInitialSetup) {
         setSetupMode(true);
       }
@@ -2945,6 +2948,7 @@ export default function AdminPanel({ onClose, onRefreshAds }) {
               {turnstileSettings.enabled !== false && turnstileSettings.protectAdminLogin !== false && (
                 <div className="pt-1 flex flex-col items-center justify-center">
                   <CloudflareTurnstile
+                    key={`admin-turnstile-${turnstileResetKey}`}
                     theme="light"
                     mode={turnstileSettings.mode}
                     siteKey={turnstileSettings.siteKey}
