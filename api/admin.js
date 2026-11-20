@@ -190,11 +190,16 @@ async function resolveAdminR2Config({ fresh = false } = {}) {
   if (!fresh && cachedAdminR2Config && now - cachedAdminR2At < ADMIN_R2_CACHE_TTL_MS) {
     return cachedAdminR2Config;
   }
-  const resolved = await resolveR2VaultConfig(supabase, { fresh });
-  if (!resolved?.configured) return null;
-  cachedAdminR2Config = resolved;
-  cachedAdminR2At = now;
-  return resolved;
+  try {
+    const resolved = await resolveR2VaultConfig(supabase, { fresh });
+    if (!resolved?.configured) return null;
+    cachedAdminR2Config = resolved;
+    cachedAdminR2At = now;
+    return resolved;
+  } catch (err) {
+    console.warn('[admin] resolveAdminR2Config caught error:', err?.message);
+    return null;
+  }
 }
 
 async function deleteR2ObjectsForAdAdmin(imageUrls = [], excludeAdId = null) {
@@ -1666,8 +1671,8 @@ export default async function handler(req, res) {
 
       const r2 = await resolveAdminR2Config();
 
-      if (!r2) {
-        return res.status(400).json({ ok: false, error: 'فضای ابری Cloudflare R2 در تنظیمات فعال نشده است.' });
+      if (!r2 || !r2.configured) {
+        return res.status(400).json({ ok: false, error: 'فضای ابری Cloudflare R2 در تنظیمات فعال نشده یا کلیدهای دسترسی آن هنوز ثبت نشده‌اند.' });
       }
 
       const kind = String(body.kind || 'logo').replace(/[^a-z0-9_-]/gi, '').slice(0, 24) || 'logo';
@@ -1744,7 +1749,7 @@ export default async function handler(req, res) {
         }
         const targetMode = value.mode === 'live' ? 'live' : 'test';
         if (targetMode === 'live' && value.enabled !== false) {
-          const tsSec = await getVaultSecret(supabase, 'turnstile_secret_key', { fresh: true });
+          const tsSec = await getVaultSecret(supabase, 'turnstile_secret_key', { fresh: true }).catch(() => null);
           if (!tsSec?.value) {
             return res.status(400).json({
               ok: false,
@@ -1843,7 +1848,7 @@ export default async function handler(req, res) {
         // Check if vault already has the token so we can stop retaining plaintext in swedpersiska_settings
         const existingVaultCf = savedToVault
           ? { value: 'ok' }
-          : await getVaultSecret(supabase, 'cloudflare_api_token', { allowEnvFallback: false });
+          : await getVaultSecret(supabase, 'cloudflare_api_token', { allowEnvFallback: false }).catch(() => null);
         const { data: existingCf } = await supabase
           .from('swedpersiska_settings')
           .select('value')
@@ -1874,8 +1879,8 @@ export default async function handler(req, res) {
         }
 
         const [vaultAk, vaultSk] = await Promise.all([
-          getVaultSecret(supabase, 'r2_access_key_id', { fresh: true, allowEnvFallback: false }),
-          getVaultSecret(supabase, 'r2_secret_access_key', { fresh: true, allowEnvFallback: false }),
+          getVaultSecret(supabase, 'r2_access_key_id', { fresh: true, allowEnvFallback: false }).catch(() => null),
+          getVaultSecret(supabase, 'r2_secret_access_key', { fresh: true, allowEnvFallback: false }).catch(() => null),
         ]);
 
         const { data: existingRow } = await supabase
@@ -1911,8 +1916,13 @@ export default async function handler(req, res) {
     }
 
     if (action === 'test_cloudflare_connection') {
-      const cfCfg = await resolveCloudflareDeployConfig(supabase, { fresh: true });
-      const cfToken = String(body.apiToken || cfCfg.apiToken || '').trim();
+      let cfCfg = { apiToken: '', accountId: '' };
+      try {
+        cfCfg = await resolveCloudflareDeployConfig(supabase, { fresh: true });
+      } catch (e) {
+        console.warn('[admin] resolveCloudflareDeployConfig caught error:', e?.message);
+      }
+      const cfToken = String(body.apiToken || cfCfg?.apiToken || '').trim();
       if (!cfToken) {
         return res.status(400).json({ ok: false, error: 'ابتدا توکن کلودفلر را وارد و ذخیره کنید.' });
       }
